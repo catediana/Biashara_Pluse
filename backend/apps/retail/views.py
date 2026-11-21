@@ -8,17 +8,22 @@ from core.pagination import DefaultPagination
 from core.permissions import HasTenantAccess
 from core.tenancy import get_active_organisation
 
-from .models import Product, StockAdjustment
+from .models import Product, Sale, StockAdjustment
 from .serializers import (
+    CheckoutSerializer,
     GoodsReceiptCreateSerializer,
     GoodsReceiptReadSerializer,
     ProductSerializer,
+    ReceiptReadSerializer,
+    SaleReadSerializer,
     StockAdjustmentCreateSerializer,
     StockAdjustmentDecisionSerializer,
     StockAdjustmentReadSerializer,
 )
 from .services import (
     approve_stock_adjustment,
+    checkout,
+    checkout_fingerprint,
     goods_receipt_fingerprint,
     receive_goods,
     reject_stock_adjustment,
@@ -247,3 +252,67 @@ class StockAdjustmentDecisionView(RetailAPIView):
             StockAdjustmentReadSerializer(adjustment).data,
             status=status.HTTP_200_OK,
         )
+
+
+class CheckoutView(RetailAPIView):
+    required_permission = "retail.sales.checkout"
+    branch_scoped = True
+
+    def get_required_permission(self):
+        return self.required_permission
+
+    def post(self, request):
+        serializer = CheckoutSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        fingerprint = checkout_fingerprint(data)
+        sale, created = checkout(
+            organisation=get_active_organisation(request),
+            branch=data["branch"],
+            shift=data["shift"],
+            lines=data["lines"],
+            payment_method=data["payment_method"],
+            amount_tendered=data.get("amount_tendered"),
+            idempotency_key=data["idempotency_key"],
+            request_fingerprint=fingerprint,
+            actor=request.user,
+        )
+        sale = (
+            type(sale).objects.for_organisation(
+                get_active_organisation(request)
+            )
+            .select_related("organisation", "branch", "shift", "cashier")
+            .prefetch_related("lines__product")
+            .get(pk=sale.pk)
+        )
+        response_data = SaleReadSerializer(sale).data
+        return Response(
+            response_data,
+            status=(
+                status.HTTP_201_CREATED if created else status.HTTP_200_OK
+            ),
+        )
+
+
+class SaleReceiptView(RetailAPIView):
+    required_permission = "retail.sales.view"
+    branch_scoped = True
+    branch_object_lookup = True
+
+    def get_required_permission(self):
+        return self.required_permission
+
+    def get(self, request, pk):
+        sale = (
+            Sale.objects.for_organisation(get_active_organisation(request))
+            .select_related("branch", "receipt")
+            .filter(pk=pk)
+            .first()
+        )
+        if sale is None:
+            raise Http404
+        self.check_object_permissions(request, sale)
+        return Response(ReceiptReadSerializer(sale.receipt).data)

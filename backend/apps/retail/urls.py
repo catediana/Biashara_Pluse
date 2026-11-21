@@ -26,4 +26,10 @@ urlpatterns = [
         views.StockAdjustmentDecisionView.as_view(),
         name="stock-adjustment-decision",
     ),
+    path("checkout/", views.CheckoutView.as_view(), name="checkout"),
+    path(
+        "sales/<uuid:pk>/receipt/",
+        views.SaleReceiptView.as_view(),
+        name="sale-receipt",
+    ),
 ]

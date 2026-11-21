@@ -10,7 +10,11 @@ from .models import (
     GoodsReceipt,
     GoodsReceiptLine,
     Product,
+    Receipt,
+    Sale,
+    SaleLine,
     StockAdjustment,
+    Shift,
     Supplier,
 )
 
@@ -260,4 +264,140 @@ class StockAdjustmentReadSerializer(serializers.ModelSerializer):
             "reviewed_by",
             "created_at",
             "reviewed_at",
+        ]
+
+
+class SaleLineInputSerializer(serializers.Serializer):
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.none())
+    quantity = ExactDecimalField(
+        max_digits=16,
+        decimal_places=3,
+        min_value=Decimal("0"),
+    )
+
+    def validate_quantity(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Quantity must be greater than zero.")
+        return value
+
+
+class CheckoutSerializer(serializers.Serializer):
+    branch = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.none())
+    shift = serializers.PrimaryKeyRelatedField(queryset=Shift.objects.none())
+    payment_method = serializers.ChoiceField(choices=Sale.PaymentMethod.choices)
+    amount_tendered = ExactDecimalField(
+        max_digits=14,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        required=False,
+        allow_null=True,
+    )
+    lines = SaleLineInputSerializer(many=True, allow_empty=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context["request"]
+        organisation = request.active_organisation
+        self.fields["branch"].queryset = Branch.objects.for_organisation(
+            organisation
+        ).filter(is_active=True)
+        self.fields["shift"].queryset = Shift.objects.for_organisation(
+            organisation
+        )
+        self.fields["lines"].child.fields["product"].queryset = (
+            Product.objects.for_organisation(organisation).filter(is_active=True)
+        )
+
+    def validate_lines(self, lines):
+        product_ids = [line["product"].pk for line in lines]
+        if len(product_ids) != len(set(product_ids)):
+            raise serializers.ValidationError(
+                "Each product may appear only once per sale."
+            )
+        return lines
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        shift = attrs["shift"]
+        if shift.cashier_id != request.user.pk:
+            raise serializers.ValidationError(
+                {"shift": "The shift must belong to the authenticated cashier."}
+            )
+        if shift.branch_id != attrs["branch"].pk:
+            raise serializers.ValidationError(
+                {"branch": "The branch must match the selected shift."}
+            )
+        if attrs["payment_method"] == Sale.PaymentMethod.MPESA:
+            if attrs.get("amount_tendered") is not None:
+                raise serializers.ValidationError(
+                    {
+                        "amount_tendered": (
+                            "Do not provide cash tendered for a pending M-Pesa sale."
+                        )
+                    }
+                )
+
+        raw_key = request.headers.get("Idempotency-Key")
+        try:
+            attrs["idempotency_key"] = UUID(raw_key)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise serializers.ValidationError(
+                {"idempotency_key": "A valid Idempotency-Key header is required."}
+            ) from exc
+        return attrs
+
+
+class SaleLineReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SaleLine
+        fields = [
+            "id",
+            "product",
+            "product_name",
+            "sku",
+            "unit",
+            "quantity",
+            "unit_price",
+            "unit_cost",
+            "tax_rate",
+            "line_subtotal",
+            "tax_amount",
+            "line_total",
+        ]
+
+
+class ReceiptReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Receipt
+        fields = [
+            "receipt_number",
+            "status",
+            "snapshot",
+            "issued_at",
+        ]
+
+
+class SaleReadSerializer(serializers.ModelSerializer):
+    lines = SaleLineReadSerializer(many=True, read_only=True)
+    receipt = ReceiptReadSerializer(read_only=True)
+
+    class Meta:
+        model = Sale
+        fields = [
+            "id",
+            "sale_number",
+            "branch",
+            "shift",
+            "cashier",
+            "payment_method",
+            "status",
+            "subtotal",
+            "tax_total",
+            "total",
+            "amount_tendered",
+            "change_due",
+            "created_at",
+            "completed_at",
+            "lines",
+            "receipt",
         ]

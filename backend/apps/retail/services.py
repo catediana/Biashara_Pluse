@@ -1,13 +1,20 @@
 import hashlib
 import json
+import uuid
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.retail.models import (
     GoodsReceipt,
     GoodsReceiptLine,
+    Product,
+    Receipt,
+    Sale,
+    SaleLine,
+    Shift,
     StockAdjustment,
     StockBalance,
     StockMovement,
@@ -56,12 +63,303 @@ def stock_adjustment_fingerprint(data):
     )
 
 
+def checkout_fingerprint(data):
+    lines = sorted(data["lines"], key=lambda line: str(line["product"].pk))
+    return _fingerprint(
+        {
+            "branch": str(data["branch"].pk),
+            "shift": str(data["shift"].pk),
+            "payment_method": data["payment_method"],
+            "amount_tendered": (
+                _decimal_text(data["amount_tendered"])
+                if data.get("amount_tendered") is not None
+                else None
+            ),
+            "lines": [
+                {
+                    "product": str(line["product"].pk),
+                    "quantity": _decimal_text(line["quantity"]),
+                }
+                for line in lines
+            ],
+        }
+    )
+
+
+def _sale_totals(lines):
+    calculated_lines = []
+    subtotal = Decimal("0.00")
+    tax_total = Decimal("0.00")
+    for line in lines:
+        product = line["product"]
+        quantity = line["quantity"]
+        line_subtotal = quantize_money(quantity * product.selling_price)
+        tax_amount = quantize_money(
+            line_subtotal * product.tax_rate / Decimal("100")
+        )
+        line_total = line_subtotal + tax_amount
+        calculated_lines.append(
+            {
+                "product": product,
+                "quantity": quantity,
+                "product_name": product.name,
+                "sku": product.sku,
+                "unit": product.unit,
+                "unit_price": product.selling_price,
+                "unit_cost": product.cost_price,
+                "tax_rate": product.tax_rate,
+                "line_subtotal": line_subtotal,
+                "tax_amount": tax_amount,
+                "line_total": line_total,
+            }
+        )
+        subtotal += line_subtotal
+        tax_total += tax_amount
+    return calculated_lines, quantize_money(subtotal), quantize_money(tax_total)
+
+
+def build_receipt_snapshot(sale):
+    return {
+        "receipt_number": sale.sale_number,
+        "sale_id": str(sale.pk),
+        "organisation": sale.organisation.name,
+        "branch": sale.branch.name,
+        "date": sale.created_at.isoformat(),
+        "cashier": sale.cashier.get_full_name() or sale.cashier.get_username(),
+        "payment_method": sale.payment_method,
+        "payment_status": sale.status,
+        "currency": sale.organisation.currency,
+        "lines": [
+            {
+                "product_name": line.product_name,
+                "sku": line.sku,
+                "unit": line.unit,
+                "quantity": format(line.quantity, "f"),
+                "unit_price": format(line.unit_price, ".2f"),
+                "tax_rate": format(line.tax_rate, ".2f"),
+                "tax_amount": format(line.tax_amount, ".2f"),
+                "line_total": format(line.line_total, ".2f"),
+            }
+            for line in sale.lines.all()
+        ],
+        "subtotal": format(sale.subtotal, ".2f"),
+        "tax_total": format(sale.tax_total, ".2f"),
+        "total": format(sale.total, ".2f"),
+        "amount_tendered": (
+            format(sale.amount_tendered, ".2f")
+            if sale.amount_tendered is not None
+            else None
+        ),
+        "change_due": format(sale.change_due, ".2f"),
+    }
+
+
 def _check_retry(existing, fingerprint):
     if existing.request_fingerprint != fingerprint:
         raise ConflictError(
             "This idempotency key was already used for a different request."
         )
     return existing, False
+
+
+def checkout(
+    *,
+    organisation,
+    branch,
+    shift,
+    lines,
+    payment_method,
+    amount_tendered,
+    idempotency_key,
+    request_fingerprint,
+    actor,
+):
+    try:
+        with transaction.atomic():
+            existing = (
+                Sale.objects.for_organisation(organisation)
+                .select_for_update()
+                .filter(idempotency_key=idempotency_key)
+                .first()
+            )
+            if existing is not None:
+                return _check_retry(existing, request_fingerprint)
+
+            locked_shift = (
+                Shift.objects.for_organisation(organisation)
+                .select_for_update()
+                .filter(
+                    pk=shift.pk,
+                    branch=branch,
+                    cashier=actor,
+                    status=Shift.Status.OPEN,
+                )
+                .first()
+            )
+            if locked_shift is None:
+                raise BusinessRuleError(
+                    "Checkout requires the cashier's open shift at this branch."
+                )
+
+            existing = (
+                Sale.objects.for_organisation(organisation)
+                .select_for_update()
+                .filter(idempotency_key=idempotency_key)
+                .first()
+            )
+            if existing is not None:
+                return _check_retry(existing, request_fingerprint)
+
+            product_ids = sorted(
+                (line["product"].pk for line in lines),
+                key=str,
+            )
+            products = list(
+                Product.objects.for_organisation(organisation)
+                .select_for_update()
+                .filter(pk__in=product_ids, is_active=True)
+                .order_by("pk")
+            )
+            if len(products) != len(product_ids):
+                raise BusinessRuleError(
+                    "One or more products are no longer available."
+                )
+            products_by_id = {product.pk: product for product in products}
+            current_lines = [
+                {
+                    "product": products_by_id[line["product"].pk],
+                    "quantity": line["quantity"],
+                }
+                for line in lines
+            ]
+
+            balances = list(
+                StockBalance.objects.for_organisation(organisation)
+                .select_for_update()
+                .filter(branch=branch, product_id__in=product_ids)
+                .order_by("product_id")
+            )
+            balances_by_product = {balance.product_id: balance for balance in balances}
+            for line in current_lines:
+                product = line["product"]
+                balance = balances_by_product.get(product.pk)
+                if (
+                    balance is None
+                    or balance.quantity < line["quantity"]
+                ):
+                    raise BusinessRuleError(
+                        f"Insufficient stock for product {product.sku}."
+                    )
+
+            calculated_lines, subtotal, tax_total = _sale_totals(current_lines)
+            total = subtotal + tax_total
+            if payment_method == Sale.PaymentMethod.CASH:
+                tendered = amount_tendered if amount_tendered is not None else total
+                if tendered < total:
+                    raise BusinessRuleError(
+                        "Cash tendered must cover the sale total."
+                    )
+                change_due = tendered - total
+                sale_status = Sale.Status.POSTED
+                completed_at = timezone.now()
+            elif payment_method == Sale.PaymentMethod.MPESA:
+                if amount_tendered is not None:
+                    raise BusinessRuleError(
+                        "Pending M-Pesa checkout does not accept a cash tender."
+                    )
+                tendered = None
+                change_due = Decimal("0.00")
+                sale_status = Sale.Status.PENDING_PAYMENT
+                completed_at = None
+            else:
+                raise BusinessRuleError("Unsupported payment method.")
+
+            sale_id = uuid.uuid4()
+            sale_number = f"BP-{sale_id.hex.upper()}"
+            sale = Sale.objects.create(
+                id=sale_id,
+                organisation=organisation,
+                branch=branch,
+                shift=locked_shift,
+                cashier=actor,
+                sale_number=sale_number,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                payment_method=payment_method,
+                status=sale_status,
+                subtotal=subtotal,
+                tax_total=tax_total,
+                total=total,
+                amount_tendered=tendered,
+                change_due=change_due,
+                completed_at=completed_at,
+            )
+
+            for line in calculated_lines:
+                product = line["product"]
+                quantity = line["quantity"]
+                SaleLine.objects.create(
+                    organisation=organisation,
+                    sale=sale,
+                    **line,
+                )
+                balance = balances_by_product[product.pk]
+                balance.quantity -= quantity
+                balance.version += 1
+                balance.save(
+                    update_fields=["quantity", "version", "updated_at"]
+                )
+                StockMovement.objects.create(
+                    organisation=organisation,
+                    branch=branch,
+                    product=product,
+                    movement_type=StockMovement.MovementType.SALE,
+                    quantity_delta=-quantity,
+                    unit_cost=line["unit_cost"],
+                    sale=sale,
+                    created_by=actor,
+                )
+
+            receipt_status = (
+                Receipt.Status.ISSUED
+                if sale.status == Sale.Status.POSTED
+                else Receipt.Status.PENDING_PAYMENT
+            )
+            Receipt.objects.create(
+                organisation=organisation,
+                sale=sale,
+                receipt_number=sale.sale_number,
+                status=receipt_status,
+                snapshot=build_receipt_snapshot(sale),
+            )
+            AuditEvent.objects.create(
+                organisation=organisation,
+                actor=actor,
+                action="retail.sale.checkout",
+                target_type="retail.Sale",
+                target_id=str(sale.pk),
+                correlation_id=idempotency_key,
+                metadata={
+                    "sale_number": sale.sale_number,
+                    "branch_id": str(branch.pk),
+                    "shift_id": str(locked_shift.pk),
+                    "payment_method": payment_method,
+                    "status": sale.status,
+                    "total": format(total, ".2f"),
+                    "currency": organisation.currency,
+                },
+            )
+            return sale, True
+    except IntegrityError:
+        existing_result = _find_existing(
+            Sale,
+            organisation,
+            idempotency_key,
+            request_fingerprint,
+        )
+        if existing_result is None:
+            raise
+        return existing_result
 
 
 def _find_existing(model, organisation, idempotency_key, fingerprint):

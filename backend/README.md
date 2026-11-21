@@ -80,6 +80,26 @@ Assign these `Permission` codenames to a role as needed:
 Grant branch access using `BranchGrant`, or set membership `all_branches` for
 organisation-wide branch access.
 
+## Retail checkout
+
+`POST /api/retail/checkout/` requires `X-Organisation-ID`,
+`Idempotency-Key`, an active `retail.sales.checkout` permission, and branch
+access. The shift must be open and belong to the authenticated cashier at the
+selected branch. The current checkout payment methods are cash and M-Pesa;
+split payments and customer credit are deferred to the payments phase. Cash
+checkout accepts an optional `amount_tendered` and returns change. M-Pesa
+checkout remains `pending_payment` until a later payment-verification workflow.
+Inventory is deducted at checkout for both methods; pending M-Pesa stock is
+therefore reserved until that workflow confirms payment or records a compensating
+reversal.
+
+Checkout locks the shift and stock rows and creates the sale, immutable line
+snapshots, stock movements, receipt snapshot, and `retail.sale.checkout` audit
+event in one transaction. A repeated idempotency key and matching request
+returns the original sale; the same key with a different request returns
+`409 Conflict`. Receipts can be retrieved through
+`GET /api/retail/sales/<uuid>/receipt/`, subject to tenant and branch access.
+
 ## Local setup
 
 From this directory, create and activate a virtual environment, then install:
