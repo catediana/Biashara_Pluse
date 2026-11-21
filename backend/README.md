@@ -1,6 +1,7 @@
 # Biashara Pulse backend
 
-Django 5 modular monolith API foundation. Sector apps are registered but intentionally contain no domain models yet.
+Django 5 modular monolith API foundation. Retail catalogue and inventory are the
+first sector workflows; other sector apps have no domain models yet.
 
 ## Authentication API
 
@@ -48,6 +49,36 @@ Protected views can use `HasTenantAccess` with a `required_permission`
 codename, optional `required_module`, and `branch_scoped = True`. Branch-scoped
 list views must also filter their queryset by the requested, authorised branch;
 detail views should enable object-permission checks.
+
+## Retail catalogue and inventory API
+
+Select an organisation on authenticated requests with the `X-Organisation-ID`
+header. The middleware resolves it only when the authenticated user has an
+active membership. Retail inventory endpoints also require an enabled Retail
+module, the matching role permission, and branch access where applicable.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET, POST | `/api/retail/products/` | Search/list or create products |
+| GET, PATCH | `/api/retail/products/<uuid>/` | Retrieve or update a tenant product |
+| POST | `/api/retail/goods-receipts/` | Receive supplier stock atomically |
+| POST | `/api/retail/stock-adjustments/` | Request a reason-coded adjustment |
+| POST | `/api/retail/stock-adjustments/<uuid>/<approve\|reject>/` | Review an adjustment |
+
+Send a UUID in `Idempotency-Key` for receipt and adjustment submissions.
+Replaying the same key and payload returns the original resource; reusing the
+key for a different payload returns `409 Conflict`. Receipt lines and stock
+movements are created with their balance updates in one database transaction.
+Adjustments do not affect stock until approved. Approval checks the expected
+stock version and prevents negative stock. Product search matches name, SKU,
+or barcode; list results use page-number pagination.
+
+Assign these `Permission` codenames to a role as needed:
+`retail.products.view`, `retail.products.create`, `retail.products.update`,
+`retail.stock.receive`, `retail.stock.adjustment.request`,
+`retail.stock.adjustment.approve`, and `retail.stock.adjustment.reject`.
+Grant branch access using `BranchGrant`, or set membership `all_branches` for
+organisation-wide branch access.
 
 ## Local setup
 

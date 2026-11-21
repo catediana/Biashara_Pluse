@@ -29,6 +29,17 @@ def get_active_membership(request):
 
     from apps.organisations.models import Membership
 
+    membership = getattr(request, "active_membership", None)
+    if (
+        membership is not None
+        and membership.user_id == user.pk
+        and membership.organisation_id == organisation.pk
+        and membership.status == Membership.Status.ACTIVE
+        and membership.role.is_active
+        and membership.role.organisation_id == organisation.pk
+    ):
+        return membership
+
     return (
         Membership.objects.select_related("role")
         .filter(
