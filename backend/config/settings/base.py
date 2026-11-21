@@ -9,6 +9,17 @@ SECRET_KEY = os.environ.get(
 )
 DEBUG = False
 ALLOWED_HOSTS = []
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = not DEBUG
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -121,6 +132,12 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+DEFAULT_FROM_EMAIL = os.environ.get(
+    "DEFAULT_FROM_EMAIL", "Biashara Pulse <no-reply@localhost>"
+)
+PASSWORD_RESET_URL = os.environ.get(
+    "PASSWORD_RESET_URL", "http://localhost:5173/reset-password"
+)
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -131,4 +148,16 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "core.pagination.DefaultPagination",
     "PAGE_SIZE": 50,
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "auth_register": "5/hour",
+        "auth_login": "5/minute",
+        "auth_logout": "10/minute",
+        "auth_password_reset": "3/hour",
+        "auth_password_reset_confirm": "5/hour",
+        "auth_session_refresh": "10/minute",
+    },
+    "NUM_PROXIES": int(os.environ.get("REST_FRAMEWORK_NUM_PROXIES", "0")),
 }
