@@ -33,6 +33,22 @@ configured to overwrite forwarded client-address headers.
 Password reset email links use `PASSWORD_RESET_URL` and `DEFAULT_FROM_EMAIL`.
 Configure these for the deployed frontend and mail backend.
 
+## Organisations and tenant access
+
+`Organisation` is the tenant root. `Branch`, `Membership`, `Role`,
+`RolePermission`, `BranchGrant`, and `ModuleEntitlement` carry an
+`organisation_id`; the shared `Permission` catalog is global. Tenant models
+inherit UUID keys and timestamps from `core.tenancy.TenantModel`.
+
+Always scope tenant queries explicitly, for example
+`Branch.objects.for_organisation(request.active_organisation)`. Set
+`request.active_organisation` only from trusted server-side organisation
+resolution, never directly from an unverified client-supplied organisation ID.
+Protected views can use `HasTenantAccess` with a `required_permission`
+codename, optional `required_module`, and `branch_scoped = True`. Branch-scoped
+list views must also filter their queryset by the requested, authorised branch;
+detail views should enable object-permission checks.
+
 ## Local setup
 
 From this directory, create and activate a virtual environment, then install:
