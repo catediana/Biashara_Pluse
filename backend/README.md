@@ -143,6 +143,41 @@ Assign these `Permission` codenames to roles for the related workflows:
 `retail.customers.create`. Grant branch access using `BranchGrant`, or set
 membership `all_branches` for organisation-wide branch access.
 
+## Integrations and background tasks
+
+The existing `DarajaClient` provides the M-Pesa STK Push and query integration.
+Email uses Django's configured mail backend; SMS uses Africa's Talking; and
+WhatsApp uses the Meta WhatsApp Cloud API. Configure credentials only through
+environment variables:
+
+| Integration | Environment variables |
+|---|---|
+| Email | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, `EMAIL_USE_SSL`, `DEFAULT_FROM_EMAIL` |
+| Africa's Talking SMS | `AFRICASTALKING_USERNAME`, `AFRICASTALKING_API_KEY`, optional `AFRICASTALKING_SENDER_ID` |
+| WhatsApp Cloud API | `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION` |
+| M-Pesa | `MPESA_ENV`, `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY`, `MPESA_CALLBACK_URL` |
+
+`queue_notification()` writes an organisation-scoped outbox record with a
+required idempotency key and queues delivery after the transaction commits.
+Notifications and reminders support email, SMS, and WhatsApp; provide
+`scheduled_at` to queue a reminder for a future time. No recurring Celery Beat
+schedules are enabled. Workers claim deliveries with a database lease, avoid
+resending completed records, retry transient provider failures with backoff,
+and mark permanent failures for inspection. Since external messaging providers
+do not all guarantee idempotency, a provider timeout or worker crash after
+acceptance can still result in at-least-once delivery.
+
+`generate_report_task` accepts an organisation UUID, one of `sales_summary`,
+`stock`, `customer_debt`, `expenses`, or `profit`, and optional
+`branch_id`/`from_date`/`to_date` filters. It is read-only and returns
+JSON-compatible rows, so retries do not create duplicate side effects. A stable
+Celery `task_id` can be used to correlate the result, but does not deduplicate
+broker messages.
+
+Configure Redis with `REDIS_URL` (or `CELERY_BROKER_URL` and
+`CELERY_RESULT_BACKEND`); workers use late acknowledgement and reject tasks
+when a worker is lost.
+
 ## Cashier shifts and expenses
 
 | Method | Path | Purpose |
