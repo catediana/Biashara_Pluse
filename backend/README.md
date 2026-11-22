@@ -80,25 +80,68 @@ Assign these `Permission` codenames to a role as needed:
 Grant branch access using `BranchGrant`, or set membership `all_branches` for
 organisation-wide branch access.
 
-## Retail checkout
+## Retail checkout and payments
 
 `POST /api/retail/checkout/` requires `X-Organisation-ID`,
 `Idempotency-Key`, an active `retail.sales.checkout` permission, and branch
 access. The shift must be open and belong to the authenticated cashier at the
-selected branch. The current checkout payment methods are cash and M-Pesa;
-split payments and customer credit are deferred to the payments phase. Cash
-checkout accepts an optional `amount_tendered` and returns change. M-Pesa
-checkout remains `pending_payment` until a later payment-verification workflow.
-Inventory is deducted at checkout for both methods; pending M-Pesa stock is
-therefore reserved until that workflow confirms payment or records a compensating
-reversal.
+selected branch. Checkout supports cash, M-Pesa, split cash/M-Pesa, and customer
+credit. Cash accepts optional `amount_tendered` and returns change. Split
+checkout requires one cash and one M-Pesa allocation whose amounts equal the
+sale total. Credit checkout requires an active customer and enforces the
+customer's hard credit limit. Customer credit balances are derived from credit
+sales, confirmed collections, and credit reductions on returns.
 
 Checkout locks the shift and stock rows and creates the sale, immutable line
-snapshots, stock movements, receipt snapshot, and `retail.sale.checkout` audit
-event in one transaction. A repeated idempotency key and matching request
-returns the original sale; the same key with a different request returns
-`409 Conflict`. Receipts can be retrieved through
-`GET /api/retail/sales/<uuid>/receipt/`, subject to tenant and branch access.
+snapshots, payment records and allocations, stock movements, receipt snapshot,
+and `retail.sale.checkout` audit event in one transaction. A repeated
+idempotency key and matching request returns the original sale; the same key
+with a different request returns `409 Conflict`. M-Pesa payments remain pending
+until the callback is matched to the payment and verified with a Daraja STK
+query. Daraja amounts must be whole currency units. Do not retry an STK request
+whose initiation outcome is unresolved; reconcile it before attempting another
+prompt. A verified failure on an M-Pesa-only sale cancels the sale, voids its
+pending receipt, and restores reserved stock exactly once. A failed M-Pesa
+allocation on a split sale remains unresolved because its cash allocation has
+already been accepted and requires operator follow-up. Receipts can be retrieved
+through `GET /api/retail/sales/<uuid>/receipt/`, subject to tenant and branch
+access.
+
+## Customers, collections, returns, and refunds
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET, POST | `/api/retail/customers/` | List or create tenant customers |
+| POST | `/api/retail/customers/<uuid>/collections/` | Record a customer collection and allocate it to credit sales |
+| POST | `/api/retail/payments/<uuid>/stk-push/` | Start a pending M-Pesa STK Push |
+| POST | `/api/retail/mpesa/callback/` | Receive and verify a Daraja callback |
+| POST | `/api/retail/sales/<uuid>/returns/` | Return original sale lines and restore accepted stock |
+| POST | `/api/retail/refunds/<uuid>/complete/` | Record completion of a pending M-Pesa refund payout |
+
+Collections require an open cashier shift, an idempotency key, and allocations
+equal to the payment amount. Allocations are locked and checked against each
+credit sale's remaining balance. Returns require the original sale, a reason,
+and quantities no greater than the unreturned sold quantity. Returned quantities
+are restocked with linked stock movements. Returns against a credit sale reduce
+that sale's remaining debt first. Cash refunds are recorded as complete in the
+return transaction; M-Pesa refunds remain pending for an external payout and
+must be completed with its payout reference.
+
+All payment and return endpoints enforce tenant and branch access. Configure
+`MPESA_ENV` (`sandbox` or `production`), `MPESA_CONSUMER_KEY`,
+`MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY`,
+`MPESA_TRANSACTION_TYPE` (`CustomerPayBillOnline` or
+`CustomerBuyGoodsOnline`), and the public `MPESA_CALLBACK_URL` using deployment
+environment variables. Production callback URLs must use HTTPS. Provider
+callbacks are not trusted as payment proof by themselves: the backend queries
+Daraja before confirming a payment and treats repeated callback events
+idempotently. The callback endpoint should be reachable only over HTTPS.
+
+Assign these `Permission` codenames to roles for the related workflows:
+`retail.sales.payment`, `retail.sales.collection`, `retail.sales.return`,
+`retail.sales.refund`, `retail.customers.view`, and
+`retail.customers.create`. Grant branch access using `BranchGrant`, or set
+membership `all_branches` for organisation-wide branch access.
 
 ## Local setup
 

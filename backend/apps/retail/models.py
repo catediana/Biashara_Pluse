@@ -290,14 +290,59 @@ class Shift(TenantModel):
         super().save(*args, **kwargs)
 
 
+class Customer(TenantModel):
+    name = models.CharField(max_length=160)
+    phone_number = models.CharField(max_length=20, blank=True)
+    email = models.EmailField(blank=True)
+    credit_limit = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["organisation", "is_active", "name"],
+                name="customer_org_active_name_idx",
+            )
+        ]
+        ordering = ["name", "pk"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(credit_limit__gte=0),
+                name="customer_credit_limit_nonnegative",
+            )
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        if self.credit_limit < 0:
+            raise ValidationError(
+                {"credit_limit": "Credit limit cannot be negative."}
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
 class Sale(TenantModel):
     class PaymentMethod(models.TextChoices):
         CASH = "cash", "Cash"
         MPESA = "mpesa", "M-Pesa"
+        SPLIT = "split", "Split payment"
+        CREDIT = "credit", "Customer credit"
 
     class Status(models.TextChoices):
         POSTED = "posted", "Posted"
         PENDING_PAYMENT = "pending_payment", "Pending payment"
+        CANCELLED = "cancelled", "Cancelled"
 
     branch = models.ForeignKey(
         "organisations.Branch",
@@ -314,6 +359,13 @@ class Sale(TenantModel):
         on_delete=models.PROTECT,
         related_name="retail_sales",
     )
+    customer = models.ForeignKey(
+        Customer,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="sales",
+    )
     sale_number = models.CharField(max_length=40)
     idempotency_key = models.UUIDField()
     request_fingerprint = models.CharField(max_length=64)
@@ -325,6 +377,11 @@ class Sale(TenantModel):
     subtotal = models.DecimalField(max_digits=14, decimal_places=2)
     tax_total = models.DecimalField(max_digits=14, decimal_places=2)
     total = models.DecimalField(max_digits=14, decimal_places=2)
+    credit_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=0,
+    )
     amount_tendered = models.DecimalField(
         max_digits=14,
         decimal_places=2,
@@ -333,6 +390,7 @@ class Sale(TenantModel):
     )
     change_due = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     completed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -355,6 +413,10 @@ class Sale(TenantModel):
             models.CheckConstraint(
                 condition=models.Q(total__gte=0),
                 name="sale_total_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(credit_amount__gte=0),
+                name="sale_credit_amount_nonnegative",
             ),
             models.CheckConstraint(
                 condition=models.Q(change_due__gte=0),
@@ -393,6 +455,14 @@ class Sale(TenantModel):
                 raise ValidationError(
                     {"shift": "The shift must match this sale's tenant, branch, and cashier."}
                 )
+        if (
+            self.customer_id
+            and self.organisation_id
+            and self.customer.organisation_id != self.organisation_id
+        ):
+            raise ValidationError(
+                {"customer": "The customer must belong to this organisation."}
+            )
         if self.payment_method == self.PaymentMethod.CASH:
             if (
                 self.status != self.Status.POSTED
@@ -400,6 +470,7 @@ class Sale(TenantModel):
                 or self.amount_tendered is None
                 or self.amount_tendered < self.total
                 or self.change_due != self.amount_tendered - self.total
+                or self.credit_amount != 0
             ):
                 raise ValidationError(
                     {
@@ -419,20 +490,52 @@ class Sale(TenantModel):
                 raise ValidationError(
                     {"status": "Pending M-Pesa sales cannot be marked paid."}
                 )
-            if self.status == self.Status.POSTED and (
-                self.amount_tendered is None
-                or self.amount_tendered < self.total
-                or self.completed_at is None
-            ):
+            if self.status == self.Status.POSTED and self.completed_at is None:
                 raise ValidationError(
                     {"status": "M-Pesa sales require verified payment to post."}
+                )
+            if self.status == self.Status.CANCELLED and (
+                self.amount_tendered is not None
+                or self.completed_at is not None
+                or self.cancelled_at is None
+            ):
+                raise ValidationError(
+                    {"status": "Cancelled M-Pesa sales require a cancellation time."}
+                )
+            if self.credit_amount != 0:
+                raise ValidationError(
+                    {"credit_amount": "M-Pesa payments cannot create credit."}
+                )
+        elif self.payment_method == self.PaymentMethod.SPLIT:
+            if self.status == self.Status.POSTED and self.completed_at is None:
+                raise ValidationError(
+                    {"status": "Completed split sales require a completion time."}
+                )
+            if self.status == self.Status.PENDING_PAYMENT and self.completed_at is not None:
+                raise ValidationError(
+                    {"status": "Pending split sales cannot have a completion time."}
+                )
+            if self.credit_amount != 0:
+                raise ValidationError(
+                    {"credit_amount": "Split payments cannot create customer credit."}
+                )
+        elif self.payment_method == self.PaymentMethod.CREDIT:
+            if (
+                self.customer_id is None
+                or self.status != self.Status.POSTED
+                or self.completed_at is None
+                or self.credit_amount != self.total
+                or self.amount_tendered is not None
+            ):
+                raise ValidationError(
+                    {"customer": "A credit sale requires a customer and full credit balance."}
                 )
 
     def save(self, *args, **kwargs):
         if self.pk and type(self).objects.filter(pk=self.pk).exists():
             previous = type(self).objects.only("status").get(pk=self.pk)
-            if previous.status == self.Status.POSTED:
-                raise ValidationError("Posted sales are immutable.")
+            if previous.status != self.Status.PENDING_PAYMENT:
+                raise ValidationError("Completed or cancelled sales are immutable.")
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -535,6 +638,7 @@ class Receipt(TenantModel):
     class Status(models.TextChoices):
         ISSUED = "issued", "Issued"
         PENDING_PAYMENT = "pending_payment", "Pending payment"
+        VOIDED = "voided", "Voided"
 
     sale = models.OneToOneField(
         Sale,
@@ -570,13 +674,474 @@ class Receipt(TenantModel):
                 )
 
     def save(self, *args, **kwargs):
-        if self.pk and type(self).objects.filter(pk=self.pk).exists():
-            raise ValidationError("Receipts are immutable.")
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).first()
+            if previous is not None and not (
+                previous.status == self.Status.PENDING_PAYMENT
+                and self.status in (self.Status.ISSUED, self.Status.VOIDED)
+                and previous.sale_id == self.sale_id
+            ):
+                raise ValidationError(
+                    "Only pending receipts may be finalized."
+                )
         self.full_clean()
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Receipts cannot be deleted.")
+
+
+class Payment(TenantModel):
+    class Purpose(models.TextChoices):
+        SALE = "sale", "Sale payment"
+        COLLECTION = "collection", "Customer collection"
+
+    class Method(models.TextChoices):
+        CASH = "cash", "Cash"
+        MPESA = "mpesa", "M-Pesa"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        FAILED = "failed", "Failed"
+
+    purpose = models.CharField(max_length=12, choices=Purpose.choices)
+    method = models.CharField(max_length=10, choices=Method.choices)
+    status = models.CharField(max_length=10, choices=Status.choices)
+    sale = models.ForeignKey(
+        Sale,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="payments",
+    )
+    customer = models.ForeignKey(
+        Customer,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="payments",
+    )
+    branch = models.ForeignKey(
+        "organisations.Branch",
+        on_delete=models.PROTECT,
+        related_name="retail_payments",
+    )
+    shift = models.ForeignKey(
+        Shift,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="payments",
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    idempotency_key = models.UUIDField()
+    request_fingerprint = models.CharField(max_length=64)
+    phone_number = models.CharField(max_length=15, blank=True)
+    merchant_request_id = models.CharField(max_length=100, blank=True)
+    checkout_request_id = models.CharField(max_length=100, blank=True)
+    provider_receipt = models.CharField(max_length=64, blank=True)
+    initiation_started_at = models.DateTimeField(null=True, blank=True)
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="initiated_retail_payments",
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organisation", "idempotency_key"],
+                name="uniq_payment_idem_org",
+            ),
+            models.UniqueConstraint(
+                fields=["method", "checkout_request_id"],
+                condition=~models.Q(checkout_request_id=""),
+                name="uniq_payment_provider_request",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="payment_amount_positive",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["organisation", "customer", "status"],
+                name="pay_org_cust_status_idx",
+            ),
+            models.Index(
+                fields=["organisation", "sale", "status"],
+                name="payment_org_sale_status_idx",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.amount <= 0:
+            raise ValidationError({"amount": "Payment amount must be positive."})
+        if self.sale_id:
+            if (
+                self.sale.organisation_id != self.organisation_id
+                or self.sale.branch_id != self.branch_id
+                or self.purpose != self.Purpose.SALE
+                or self.customer_id != self.sale.customer_id
+            ):
+                raise ValidationError(
+                    {"sale": "Payment references must match the sale tenant and customer."}
+                )
+        elif self.purpose != self.Purpose.COLLECTION or self.customer_id is None:
+            raise ValidationError(
+                {"customer": "Customer collection payments require a customer."}
+            )
+        if (
+            self.customer_id
+            and self.customer.organisation_id != self.organisation_id
+        ):
+            raise ValidationError(
+                {"customer": "The customer must belong to this organisation."}
+            )
+        if self.branch.organisation_id != self.organisation_id:
+            raise ValidationError(
+                {"branch": "The branch must belong to this organisation."}
+            )
+        if self.shift_id and (
+            self.shift.organisation_id != self.organisation_id
+            or self.shift.branch_id != self.branch_id
+        ):
+            raise ValidationError(
+                {"shift": "The shift must match the payment tenant and branch."}
+            )
+        if self.method == self.Method.MPESA and not self.phone_number:
+            if self.status == self.Status.PENDING and self.checkout_request_id:
+                raise ValidationError(
+                    {"phone_number": "M-Pesa payment requires a phone number."}
+                )
+        if self.status == self.Status.CONFIRMED and self.confirmed_at is None:
+            raise ValidationError(
+                {"confirmed_at": "Confirmed payments require a confirmation time."}
+            )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).first()
+            if previous and previous.status != self.Status.PENDING:
+                raise ValidationError("Confirmed and failed payments are immutable.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class PaymentAllocation(TenantModel):
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="allocations",
+    )
+    sale = models.ForeignKey(
+        Sale,
+        on_delete=models.PROTECT,
+        related_name="payment_allocations",
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organisation", "payment", "sale"],
+                name="uniq_payment_sale_allocation",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="payment_allocation_positive",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.amount <= 0:
+            raise ValidationError({"amount": "Allocation must be positive."})
+        if (
+            self.payment.organisation_id != self.organisation_id
+            or self.sale.organisation_id != self.organisation_id
+        ):
+            raise ValidationError(
+                "Payment allocation references must belong to this organisation."
+            )
+        if self.payment.sale_id and self.payment.sale_id != self.sale_id:
+            raise ValidationError(
+                {"sale": "Sale payments can only be allocated to their own sale."}
+            )
+        if self.payment.customer_id != self.sale.customer_id:
+            raise ValidationError(
+                {"sale": "Payment and sale must belong to the same customer."}
+            )
+        if self.payment.branch_id != self.sale.branch_id:
+            raise ValidationError(
+                {"sale": "Payment and sale must belong to the same branch."}
+            )
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Payment allocations are immutable.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Payment allocations cannot be deleted.")
+
+
+class MpesaProviderEvent(TenantModel):
+    class Status(models.TextChoices):
+        RECEIVED = "received", "Received"
+        PROCESSED = "processed", "Processed"
+        REJECTED = "rejected", "Rejected"
+
+    event_id = models.CharField(max_length=100)
+    payment = models.ForeignKey(
+        Payment,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="provider_events",
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.RECEIVED,
+    )
+    result_code = models.CharField(max_length=16)
+    payload_fingerprint = models.CharField(max_length=64)
+    received_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organisation", "event_id"],
+                name="uniq_mpesa_event_org",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.payment_id
+            and self.payment.organisation_id != self.organisation_id
+        ):
+            raise ValidationError(
+                {"payment": "Provider event payment must belong to this organisation."}
+            )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).first()
+            if previous and not (
+                previous.status == self.Status.RECEIVED
+                and self.status in (self.Status.PROCESSED, self.Status.REJECTED)
+            ):
+                raise ValidationError("Processed provider events are immutable.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class SaleReturn(TenantModel):
+    sale = models.ForeignKey(
+        Sale,
+        on_delete=models.PROTECT,
+        related_name="returns",
+    )
+    branch = models.ForeignKey(
+        "organisations.Branch",
+        on_delete=models.PROTECT,
+        related_name="retail_returns",
+    )
+    idempotency_key = models.UUIDField()
+    request_fingerprint = models.CharField(max_length=64)
+    reason = models.CharField(max_length=255)
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    credit_reduction_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=0,
+    )
+    refund_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="retail_returns",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organisation", "idempotency_key"],
+                name="uniq_return_idem_org",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_amount__gt=0),
+                name="sale_return_total_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(credit_reduction_amount__gte=0),
+                name="sale_return_credit_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(refund_amount__gte=0),
+                name="sale_return_refund_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    credit_reduction_amount=models.F("total_amount")
+                    - models.F("refund_amount")
+                ),
+                name="sale_return_amounts_match",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.sale.organisation_id != self.organisation_id
+            or self.sale.branch_id != self.branch_id
+            or self.branch.organisation_id != self.organisation_id
+        ):
+            raise ValidationError(
+                "Return references must match the sale tenant and branch."
+            )
+        if (
+            self.credit_reduction_amount + self.refund_amount
+            != self.total_amount
+        ):
+            raise ValidationError(
+                "Credit reduction and refund must equal the return total."
+            )
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Returns are immutable.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Returns cannot be deleted.")
+
+
+class SaleReturnLine(TenantModel):
+    sale_return = models.ForeignKey(
+        SaleReturn,
+        on_delete=models.PROTECT,
+        related_name="lines",
+    )
+    sale_line = models.ForeignKey(
+        SaleLine,
+        on_delete=models.PROTECT,
+        related_name="return_lines",
+    )
+    quantity = models.DecimalField(max_digits=16, decimal_places=3)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organisation", "sale_return", "sale_line"],
+                name="uniq_return_line_org",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0),
+                name="sale_return_quantity_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="sale_return_line_amount_positive",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.sale_return.organisation_id != self.organisation_id
+            or self.sale_line.organisation_id != self.organisation_id
+            or self.sale_return.sale_id != self.sale_line.sale_id
+        ):
+            raise ValidationError(
+                "Return line and original sale line references must match."
+            )
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Return lines are immutable.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Return lines cannot be deleted.")
+
+
+class Refund(TenantModel):
+    class Method(models.TextChoices):
+        CASH = "cash", "Cash"
+        MPESA = "mpesa", "M-Pesa"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending payout"
+        COMPLETED = "completed", "Completed"
+
+    sale_return = models.OneToOneField(
+        SaleReturn,
+        on_delete=models.PROTECT,
+        related_name="refund",
+    )
+    method = models.CharField(max_length=10, choices=Method.choices)
+    status = models.CharField(max_length=10, choices=Status.choices)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    payout_reference = models.CharField(max_length=100, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="retail_refunds",
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="refund_amount_positive",
+            )
+        ]
+
+    @property
+    def branch(self):
+        return self.sale_return.branch
+
+    def clean(self):
+        super().clean()
+        if (
+            self.sale_return.organisation_id != self.organisation_id
+            or self.amount != self.sale_return.refund_amount
+        ):
+            raise ValidationError(
+                "Refund must match its return tenant and remaining refund amount."
+            )
+        if self.method == self.Method.CASH and self.status != self.Status.COMPLETED:
+            raise ValidationError({"status": "Cash refunds complete immediately."})
+        if self.method == self.Method.CASH and self.completed_at is None:
+            raise ValidationError(
+                {"completed_at": "Cash refunds require a completion time."}
+            )
+        if self.method == self.Method.MPESA and self.status == self.Status.COMPLETED:
+            if self.completed_at is None or not self.payout_reference:
+                raise ValidationError(
+                    {"payout_reference": "Completed M-Pesa refunds require a payout reference."}
+                )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).first()
+            if previous and previous.status != self.Status.PENDING:
+                raise ValidationError("Completed refunds are immutable.")
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class GoodsReceipt(TenantModel):
@@ -810,6 +1375,7 @@ class StockMovement(TenantModel):
         ADJUSTMENT = "adjustment", "Stock adjustment"
         SALE = "sale", "Sale"
         RETURN = "return", "Return"
+        SALE_REVERSAL = "sale_reversal", "Failed sale reversal"
 
     branch = models.ForeignKey(
         "organisations.Branch",
@@ -821,7 +1387,7 @@ class StockMovement(TenantModel):
         on_delete=models.PROTECT,
         related_name="stock_movements",
     )
-    movement_type = models.CharField(max_length=12, choices=MovementType.choices)
+    movement_type = models.CharField(max_length=16, choices=MovementType.choices)
     quantity_delta = models.DecimalField(max_digits=16, decimal_places=3)
     unit_cost = models.DecimalField(
         max_digits=12,
@@ -849,6 +1415,20 @@ class StockMovement(TenantModel):
         on_delete=models.PROTECT,
         related_name="stock_movements",
     )
+    sale_return_line = models.ForeignKey(
+        "retail.SaleReturnLine",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
+    payment = models.ForeignKey(
+        Payment,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="stock_movements",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -865,6 +1445,11 @@ class StockMovement(TenantModel):
             models.CheckConstraint(
                 condition=models.Q(unit_cost__gte=0),
                 name="stock_movement_cost_nonnegative",
+            ),
+            models.UniqueConstraint(
+                fields=["organisation", "sale", "product"],
+                condition=models.Q(movement_type="sale_reversal"),
+                name="uniq_failed_sale_reversal",
             ),
         ]
         indexes = [
@@ -892,7 +1477,13 @@ class StockMovement(TenantModel):
                     {"product": "The product must belong to this organisation."}
                 )
         if self.movement_type == self.MovementType.RECEIPT:
-            if not self.goods_receipt_id or self.stock_adjustment_id:
+            if (
+                not self.goods_receipt_id
+                or self.stock_adjustment_id
+                or self.sale_id
+                or self.sale_return_line_id
+                or self.payment_id
+            ):
                 raise ValidationError(
                     "A receipt movement must reference one goods receipt."
                 )
@@ -912,7 +1503,13 @@ class StockMovement(TenantModel):
                     {"quantity_delta": "Receipt movement quantity must be positive."}
                 )
         elif self.movement_type == self.MovementType.ADJUSTMENT:
-            if not self.stock_adjustment_id or self.goods_receipt_id:
+            if (
+                not self.stock_adjustment_id
+                or self.goods_receipt_id
+                or self.sale_id
+                or self.sale_return_line_id
+                or self.payment_id
+            ):
                 raise ValidationError(
                     "An adjustment movement must reference one stock adjustment."
                 )
@@ -934,6 +1531,8 @@ class StockMovement(TenantModel):
                 not self.sale_id
                 or self.goods_receipt_id
                 or self.stock_adjustment_id
+                or self.sale_return_line_id
+                or self.payment_id
             ):
                 raise ValidationError("A sale movement must reference one sale.")
             if (
@@ -951,10 +1550,70 @@ class StockMovement(TenantModel):
                 raise ValidationError(
                     {"quantity_delta": "Sale movement quantity must be negative."}
                 )
-        elif self.goods_receipt_id or self.stock_adjustment_id or self.sale_id:
-            raise ValidationError(
-                "Return movements cannot reference receipt, adjustment, or sale records."
-            )
+        elif self.movement_type == self.MovementType.SALE_REVERSAL:
+            if (
+                not self.sale_id
+                or not self.payment_id
+                or self.goods_receipt_id
+                or self.stock_adjustment_id
+                or self.sale_return_line_id
+            ):
+                raise ValidationError(
+                    "A failed sale reversal must reference its sale and payment."
+                )
+            if (
+                self.sale.organisation_id != self.organisation_id
+                or self.sale.branch_id != self.branch_id
+                or self.sale.status != Sale.Status.CANCELLED
+                or self.payment.organisation_id != self.organisation_id
+                or self.payment.sale_id != self.sale_id
+                or self.payment.status != Payment.Status.FAILED
+                or self.payment.method != Payment.Method.MPESA
+            ):
+                raise ValidationError(
+                    {"payment": "Reversal references must match a failed M-Pesa sale."}
+                )
+            if not self.sale.lines.filter(product_id=self.product_id).exists():
+                raise ValidationError(
+                    {"product": "The product must be included on the sale."}
+                )
+            if self.quantity_delta <= 0:
+                raise ValidationError(
+                    {"quantity_delta": "Sale reversal quantity must be positive."}
+                )
+        elif self.movement_type == self.MovementType.RETURN:
+            if (
+                not self.sale_return_line_id
+                or self.goods_receipt_id
+                or self.stock_adjustment_id
+                or self.sale_id
+                or self.payment_id
+            ):
+                raise ValidationError(
+                    "A return movement must reference one sale return line."
+                )
+            return_line = self.sale_return_line
+            if (
+                return_line.organisation_id != self.organisation_id
+                or return_line.sale_return.branch_id != self.branch_id
+                or return_line.sale_line.product_id != self.product_id
+                or return_line.quantity != self.quantity_delta
+            ):
+                raise ValidationError(
+                    {"sale_return_line": "Return movement references must match."}
+                )
+            if self.quantity_delta <= 0:
+                raise ValidationError(
+                    {"quantity_delta": "Return movement quantity must be positive."}
+                )
+        elif (
+            self.goods_receipt_id
+            or self.stock_adjustment_id
+            or self.sale_id
+            or self.sale_return_line_id
+            or self.payment_id
+        ):
+            raise ValidationError("Stock movement references must match its type.")
 
     def save(self, *args, **kwargs):
         self.full_clean()

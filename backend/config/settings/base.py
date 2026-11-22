@@ -139,6 +139,15 @@ DEFAULT_FROM_EMAIL = os.environ.get(
 PASSWORD_RESET_URL = os.environ.get(
     "PASSWORD_RESET_URL", "http://localhost:5173/reset-password"
 )
+MPESA_ENV = os.environ.get("MPESA_ENV", "sandbox")
+MPESA_CONSUMER_KEY = os.environ.get("MPESA_CONSUMER_KEY", "")
+MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET", "")
+MPESA_SHORTCODE = os.environ.get("MPESA_SHORTCODE", "")
+MPESA_PASSKEY = os.environ.get("MPESA_PASSKEY", "")
+MPESA_CALLBACK_URL = os.environ.get("MPESA_CALLBACK_URL", "")
+MPESA_TRANSACTION_TYPE = os.environ.get(
+    "MPESA_TRANSACTION_TYPE", "CustomerPayBillOnline"
+)
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -159,6 +168,8 @@ REST_FRAMEWORK = {
         "auth_password_reset": "3/hour",
         "auth_password_reset_confirm": "5/hour",
         "auth_session_refresh": "10/minute",
+        "mpesa_callback": "120/minute",
+        "retail_payment_initiate": "5/minute",
     },
     "NUM_PROXIES": int(os.environ.get("REST_FRAMEWORK_NUM_PROXIES", "0")),
 }

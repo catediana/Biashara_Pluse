@@ -1,16 +1,31 @@
-# Biashara Pulse — Development Phases and Copilot Prompts
-Version: 0.4 | Date: 2026-11-20
+# Biashara Pulse — Development Phases
+Version: 1.0 | Date: 2026-11-20
 
-## How to use this file
-Work through the phases in order. Do not start a later phase until the earlier phase is complete and tested.
+This file contains four implementation tracks: Backend, Frontend, QA and Security, and Deployment.
+Follow the phases in order. After each Copilot prompt, use the commit message shown beneath it.
 
-After each Copilot prompt, use the commit message shown directly beneath it. Review generated code, migrations, and security-sensitive changes before committing.
+## How to use
+1. Build Backend Phase.
+2. Build matching Frontend Phase.
+3. Run QA and Security Phase.
+4. Deploy when ready.
+5. Move to next phase.
 
-## Phase 0 — Project setup
+# Backend Implementation Phases
+
+## Backend Phase 1 — Project setup
 ### Goal
-Create repository, backend, frontend, database, testing, Docker, and CI setup.
+Set up Django project, PostgreSQL, Redis, Celery, and project structure.
 
-### Copilot prompts and commit messages
+### Tasks
+- Create Django project
+- Create apps
+- Set up settings
+- Connect PostgreSQL
+- Set up Redis and Celery
+- Create requirements files
+
+### Copilot prompt
 ```text
 Create a Django 5 project named backend for Biashara Pulse.
 Use a modular monolith with config and apps folders.
@@ -20,492 +35,718 @@ Use PostgreSQL, Redis, Celery, and Django REST Framework.
 Create base, development, testing, and production settings.
 Do not create sector models yet.
 ```
-**Commit message:**
+
+### Commit message
 ```text
 chore: set up Django project structure and settings
 ```
 
-```text
-Create a React + TypeScript + Vite project named frontend.
-Use Tailwind CSS, React Router, TanStack Query, React Hook Form, Zod, Vitest, and React Testing Library.
-Create app, features, shared, styles, and tests folders.
-Create API client, auth provider, organisation provider, and layout components.
-Do not create sector pages yet.
-```
-**Commit message:**
-```text
-chore: set up React TypeScript frontend structure
-```
-
-```text
-Create Docker Compose configuration for Django backend, PostgreSQL, Redis, Celery worker, and React frontend.
-Create development and production configurations.
-Use environment variables for secrets and create .env.example without real secrets.
-```
-**Commit message:**
-```text
-chore: add Docker Compose development and production setup
-```
-
-```text
-Create a GitHub Actions CI workflow for backend linting, Django tests, frontend linting, TypeScript checks, and frontend tests.
-Use PostgreSQL and Redis services.
-Do not deploy to production automatically.
-```
-**Commit message:**
-```text
-ci: add backend and frontend CI workflow
-```
-
 ### Definition of done
-Backend and frontend run locally; database and Redis connect; CI passes; secrets are not committed.
+- Django project runs
+- PostgreSQL connects
+- Redis connects
+- Celery worker runs
+- Settings are organised
 
-## Phase 1 — Shared platform foundation
+## Backend Phase 2 — Authentication and users
 ### Goal
-Build authentication, organisations, memberships, roles, permissions, tenant isolation, audit logging, and subscriptions.
+Build user registration, login, logout, password reset, and session management.
 
-### Copilot prompts and commit messages
-```text
-Create Django models for User, Organisation, Branch, Membership, Role, Permission, RolePermission, BranchGrant, Subscription, ModuleEntitlement, AuditEvent, and SupportGrant.
-Use UUID primary keys.
-Every tenant-owned model must have organisation_id.
-Add indexes and constraints.
-Do not create sector models.
-```
-**Commit message:**
-```text
-feat(platform): add core tenancy, RBAC, billing, and audit models
-```
+### Tasks
+- Create User model
+- Create authentication APIs
+- Add password reset
+- Add session management
+- Add rate limiting
 
-```text
-Create reusable tenant-scoped queryset and manager.
-Every tenant-owned model must filter by organisation.
-Create TenantModel abstract base with organisation, created_at, updated_at, and version.
-Resolve active organisation from authenticated membership, not client input.
-```
-**Commit message:**
-```text
-feat(platform): add tenant-scoped models and organisation resolution
-```
-
+### Copilot prompt
 ```text
 Create Django REST Framework authentication endpoints: register, login, logout, password reset request, password reset confirm, current user, and session refresh.
 Use secure session cookies, CSRF protection, rate limiting, and password validation.
 Do not store tokens in localStorage.
 ```
-**Commit message:**
+
+### Commit message
 ```text
 feat(auth): add secure authentication and session endpoints
 ```
 
+### Definition of done
+- Users can register
+- Users can log in
+- Users can reset password
+- Sessions are secure
+
+## Backend Phase 3 — Organisations, branches, roles
+### Goal
+Build organisations, branches, memberships, roles, permissions, and tenant isolation.
+
+### Tasks
+- Create Organisation model
+- Create Branch model
+- Create Membership model
+- Create Role and Permission models
+- Create tenant-scoped querysets
+- Create permission classes
+
+### Copilot prompt
 ```text
-Create role-based access control.
-Create permissions for organisation, staff, retail sales, stock, customers, reporting, audit, and subscriptions.
-Create permission classes checking membership, role permissions, branch access, and module entitlement.
+Create Django models for Organisation, Branch, Membership, Role, Permission, RolePermission, and BranchGrant.
+Every tenant-owned model must have organisation_id.
+Create reusable tenant-scoped queryset and manager.
+Create permission classes that check membership, role permissions, branch access, and module entitlement.
 Write cross-tenant denial tests.
 ```
-**Commit message:**
-```text
-feat(rbac): add role-based permissions and access enforcement
-```
 
+### Commit message
 ```text
-Create audit logging service.
-Log actor, action, target type and ID, organisation, reason, correlation ID, timestamp, and redacted metadata.
-Log login, permission denial, organisation creation, staff invitation, role change, sale, stock adjustment, payment, refund, and support access.
-Do not log passwords, tokens, or raw provider payloads.
-```
-**Commit message:**
-```text
-feat(audit): add audit logging for sensitive platform actions
+feat(platform): add organisations, roles, permissions, and tenant isolation
 ```
 
 ### Definition of done
-Users can register and manage organisations; staff roles work; tenant isolation tests pass; audit events are created.
+- Organisations can be created
+- Staff can be invited
+- Roles and permissions work
+- Tenant isolation is enforced
 
-## Phase 2 — Retail catalogue and inventory
+## Backend Phase 4 — Retail catalogue and stock
 ### Goal
-Build products, categories, suppliers, stock balances, movements, receiving, and adjustments.
+Build products, categories, suppliers, stock balances, stock movements, goods receiving, and adjustments.
 
-### Copilot prompts and commit messages
+### Tasks
+- Create Product model
+- Create Category model
+- Create Supplier model
+- Create StockBalance model
+- Create StockMovement model
+- Create GoodsReceipt model
+- Create StockAdjustment model
+
+### Copilot prompt
 ```text
 Create Retail models: Category, Product, Supplier, StockBalance, StockMovement, GoodsReceipt, GoodsReceiptLine, and StockAdjustment.
 Every model must be organisation-scoped.
 Use UUIDs, decimal money and quantity fields, and indexes.
-Do not create sales, payments, returns, or shifts yet.
-```
-**Commit message:**
-```text
-feat(retail): add catalogue, supplier, and inventory models
+Create product catalogue API, goods receiving workflow, and stock adjustment workflow.
+Use database transactions and idempotency keys.
+Write tests for duplicate submission, invalid quantity, and cross-tenant denial.
 ```
 
+### Commit message
 ```text
-Create product catalogue API: list, create, retrieve, update, deactivate.
-Support search by name, SKU, and barcode.
-Enforce tenant isolation, permissions, and cursor pagination.
-Write cross-tenant denial tests.
-```
-**Commit message:**
-```text
-feat(retail): add product catalogue API and search
-```
-
-```text
-Create goods receiving workflow.
-Create supplier receipt, receipt lines, stock balance update, and stock movement.
-Use a database transaction and idempotency key.
-Calculate moving weighted-average cost.
-Test duplicate submission, invalid quantity, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(retail): add supplier goods receiving and stock valuation
-```
-
-```text
-Create stock adjustment workflow.
-Stock clerks request adjustments; managers approve.
-Require reason, expected stock version, and audit event.
-Use transaction, prevent negative stock, and create stock movement.
-Test approval, rejection, stale version, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(retail): add approved stock adjustments and movement ledger
-```
-
-```text
-Create low-stock alert logic.
-Compare stock quantity with reorder level.
-Create idempotent Celery notification task.
-Test low stock, sufficient stock, duplicate prevention, and tenant isolation.
-```
-**Commit message:**
-```text
-feat(retail): add low-stock notifications
+feat(retail): add catalogue, stock, receiving, and adjustments
 ```
 
 ### Definition of done
-Catalogue, receiving, stock movements, adjustments, and alerts work; cross-tenant tests pass.
+- Products can be managed
+- Stock can be received
+- Stock adjustments work
+- Stock movements are traceable
 
-## Phase 3 — Retail POS and sales
+## Backend Phase 5 — Retail POS and sales
 ### Goal
-Build POS, sales, receipts, payments, customer credit, collections, returns, and refunds.
+Build sales, sale lines, receipts, and checkout.
 
-### Copilot prompts and commit messages
-```text
-Create Retail sales models: Customer, Sale, SaleLine, Payment, PaymentAllocation, Return, ReturnLine, Refund, Expense, and Shift.
-Use organisation scoping, UUIDs, decimals, immutable posted records, and constraints.
-Snapshot product name, SKU, unit, price, discount, tax, and cost on sale lines.
-Do not allow editing or deleting posted sales.
-```
-**Commit message:**
-```text
-feat(retail): add sales, payments, returns, and shift models
-```
+### Tasks
+- Create Sale model
+- Create SaleLine model
+- Create receipt logic
+- Create checkout API
+- Add stock reduction
 
+### Copilot prompt
 ```text
-Create retail checkout endpoint.
-Input: branch, shift, optional customer, sale lines, tenders, and override reason.
-Validate permissions, branch, shift, stock, customer credit, and payment method.
+Create Retail sales models: Sale, SaleLine, and receipt logic.
+Create checkout API that validates permissions, branch, shift, stock, and payment method.
 Use one database transaction and idempotency key.
-Create sale, lines, stock movements, allocations, receipt, and audit event atomically.
-Test success, insufficient stock, concurrency, duplicate key, invalid payment, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(retail): add atomic POS checkout and stock allocation
+Create sale, lines, stock movements, receipt, and audit event atomically.
+Test success, insufficient stock, concurrency, duplicate key, and cross-tenant denial.
 ```
 
+### Commit message
+```text
+feat(retail): add POS checkout, sales, and receipts
+```
+
+### Definition of done
+- Sales can be created
+- Stock reduces correctly
+- Receipts are generated
+- Checkout is atomic
+
+## Backend Phase 6 — Payments, credit, returns
+### Goal
+Build payments, customer credit, collections, returns, and refunds.
+
+### Tasks
+- Create Payment model
+- Create PaymentAllocation model
+- Create Customer model
+- Create Return model
+- Create Refund model
+
+### Copilot prompt
 ```text
 Create payment handling for cash, M-Pesa, split payment, and customer credit.
-A pending M-Pesa payment must not settle a sale until verified.
-Prevent over-allocation.
-Create collection logic that reduces the correct customer balance.
-Test pending, confirmed, duplicate provider event, invalid allocation, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(retail): add payment verification, allocation, and collections
+Create payment allocation, customer collection, return, and refund workflows.
+Use database transactions.
+Prevent over-allocation and excessive returns.
+Test pending payment, confirmed payment, duplicate provider event, invalid allocation, and cross-tenant denial.
 ```
 
+### Commit message
 ```text
-Create retail return workflow.
-Returns must reference original sale and sale lines.
-Prevent returning more than remaining sold quantity.
-Create return, return lines, stock movements, debt reversal, and refund records.
-Use transaction and separate asynchronous refund workflow.
-Test excessive return, duplicate return, refund failure, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(retail): add bounded returns and refund workflow
-```
-
-```text
-Create immutable receipt generation.
-Include business, receipt number, date, cashier, customer, lines, totals, tax, discounts, payment breakdown, and change.
-Support PDF and reprint.
-Use transactional outbox so printer or email failure does not cancel a posted sale.
-```
-**Commit message:**
-```text
-feat(retail): add immutable receipts and outbox delivery
+feat(retail): add payments, credit, collections, returns, and refunds
 ```
 
 ### Definition of done
-POS completes sales; stock and receipts update correctly; credit, collections, returns, and refunds work; atomic tests pass.
+- Payments work
+- Credit works
+- Collections work
+- Returns and refunds work
 
-## Phase 4 — Shifts, reports, and admin
+## Backend Phase 7 — Shifts, expenses, reports
 ### Goal
-Build shifts, cash reconciliation, expenses, reports, exports, and administration.
+Build shifts, cash reconciliation, expenses, reports, and exports.
 
-### Copilot prompts and commit messages
+### Tasks
+- Create Shift model
+- Create Expense model
+- Create report APIs
+- Create CSV export
+
+### Copilot prompt
 ```text
-Create cashier shift workflow.
-Open shift with float; close with counted cash.
+Create cashier shift workflow, expense management, and reporting endpoints.
 Calculate expected cash, counted cash, and variance.
-Prevent posting after close.
-Use transactions and row locking.
-Test open, close, duplicate open, posting after close, and variance.
-```
-**Commit message:**
-```text
-feat(retail): add shift opening, closing, and cash reconciliation
-```
-
-```text
-Create expense management.
-Allow authorised users to record expenses and cash payouts.
-Link expenses to shifts where applicable.
-Use transactions and audit events.
-Test creation, approval, reconciliation, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(retail): add expense recording and approval
-```
-
-```text
-Create reporting endpoints for sales summary, stock, customer debt, expenses, and profit.
+Create sales summary, stock report, customer debt report, expense report, and profit report.
 Support date and branch filters, pagination, and CSV export.
-Distinguish gross sales, returns, net revenue, tax, expenses, and pending refunds.
-Do not present estimated profit as final accounting profit.
-```
-**Commit message:**
-```text
-feat(retail): add sales, stock, debt, and profit reports
 ```
 
+### Commit message
 ```text
-Create organisation admin dashboard API.
-Return profile, staff, roles, branches, subscription, audit summary, and retail metrics.
-Enforce permissions and tenant isolation.
-Test owner, manager, cashier, and unauthorised access.
-```
-**Commit message:**
-```text
-feat(platform): add organisation admin dashboard API
+feat(retail): add shifts, expenses, reports, and exports
 ```
 
 ### Definition of done
-Shift reconciliation, expenses, reports, exports, dashboard, and audit viewer work.
+- Shifts work
+- Expenses work
+- Reports work
+- CSV export works
 
-## Phase 5 — QA, security, and pilot
+## Backend Phase 8 — Integrations and background jobs
 ### Goal
-Test, secure, prepare support, and pilot the Retail MVP.
+Build M-Pesa, email, SMS, WhatsApp, and Celery tasks.
 
-### Copilot prompts and commit messages
+### Tasks
+- Create integration services
+- Create Celery tasks
+- Add notifications
+- Add M-Pesa integration
+
+### Copilot prompt
 ```text
-Create Playwright end-to-end tests for onboarding, staff invitation, product creation, stock receiving, POS sale, receipt, credit sale, collection, return, shift close, and reports.
+Create integration services for M-Pesa, email, SMS, and WhatsApp.
+Create Celery tasks for notifications, reminders, and reports.
+Use environment variables for secrets.
+Make tasks idempotent and retry-safe.
+```
+
+### Commit message
+```text
+feat(integrations): add M-Pesa, notifications, and background jobs
+```
+
+### Definition of done
+- Integrations work
+- Background jobs work
+- Notifications work
+
+# Frontend Implementation Phases
+
+## Frontend Phase 1 — Project setup
+### Goal
+Set up React, TypeScript, Tailwind, routing, and API client.
+
+### Tasks
+- Create React project
+- Set up Tailwind
+- Set up routing
+- Create API client
+- Create layout
+
+### Copilot prompt
+```text
+Create a React + TypeScript + Vite project named frontend.
+Use Tailwind CSS, React Router, TanStack Query, React Hook Form, Zod, Vitest, and React Testing Library.
+Create app, features, shared, styles, and tests folders.
+Create API client, auth provider, organisation provider, and layout components.
+```
+
+### Commit message
+```text
+chore: set up React TypeScript frontend structure
+```
+
+### Definition of done
+- React project runs
+- Tailwind works
+- Routing works
+- API client works
+
+## Frontend Phase 2 — Authentication and layout
+### Goal
+Build login, signup, password reset, and layout.
+
+### Tasks
+- Create login page
+- Create signup page
+- Create password reset pages
+- Create layout
+
+### Copilot prompt
+```text
+Create authentication pages: login, signup, forgot password, reset password.
+Create layout with sidebar and top bar.
+Connect to backend authentication APIs.
+Handle loading, error, and success states.
+```
+
+### Commit message
+```text
+feat(auth): add authentication pages and layout
+```
+
+### Definition of done
+- Login works
+- Signup works
+- Password reset works
+- Layout works
+
+## Frontend Phase 3 — Organisation and staff
+### Goal
+Build organisation selection, creation, staff, roles.
+
+### Tasks
+- Create organisation selection
+- Create organisation creation
+- Create staff management
+- Create roles management
+
+### Copilot prompt
+```text
+Create organisation selection, organisation creation, staff management, and roles management pages.
+Connect to backend APIs.
+Handle loading, empty, error, and success states.
+```
+
+### Commit message
+```text
+feat(organisations): add organisation and staff management
+```
+
+### Definition of done
+- Organisation selection works
+- Organisation creation works
+- Staff management works
+- Roles management works
+
+## Frontend Phase 4 — Retail dashboard
+### Goal
+Build retail dashboard with KPIs and quick actions.
+
+### Tasks
+- Create dashboard page
+- Create KPI cards
+- Create charts
+- Create quick actions
+
+### Copilot prompt
+```text
+Create retail dashboard with KPI cards, sales trend chart, low-stock alerts, recent sales, and quick actions.
+Connect to backend reporting APIs.
+Handle loading, empty, error, and success states.
+```
+
+### Commit message
+```text
+feat(retail): add dashboard with KPIs and quick actions
+```
+
+### Definition of done
+- Dashboard works
+- KPIs work
+- Charts work
+- Quick actions work
+
+## Frontend Phase 5 — Product catalogue
+### Goal
+Build product list, add product, edit product.
+
+### Tasks
+- Create product list
+- Create add product
+- Create edit product
+- Create category filter
+
+### Copilot prompt
+```text
+Create product catalogue pages: list, add, edit, deactivate.
+Connect to backend product APIs.
+Handle loading, empty, error, and success states.
+```
+
+### Commit message
+```text
+feat(retail): add product catalogue pages
+```
+
+### Definition of done
+- Product list works
+- Add product works
+- Edit product works
+- Category filter works
+
+## Frontend Phase 6 — POS and cart
+### Goal
+Build POS screen, cart, and checkout.
+
+### Tasks
+- Create POS screen
+- Create product search
+- Create cart
+- Create checkout
+
+### Copilot prompt
+```text
+Create POS screen with product search, product grid, cart, quantity controls, totals, and checkout.
+Connect to backend checkout API.
+Handle loading, empty, error, and success states.
+```
+
+### Commit message
+```text
+feat(retail): add POS screen and cart
+```
+
+### Definition of done
+- POS works
+- Cart works
+- Checkout works
+
+## Frontend Phase 7 — Payments and receipts
+### Goal
+Build payment screen and receipt screen.
+
+### Tasks
+- Create payment screen
+- Create receipt screen
+- Create reprint
+
+### Copilot prompt
+```text
+Create payment screen with cash, M-Pesa, split payment, and customer credit.
+Create receipt screen with print, share, reprint.
+Connect to backend payment and receipt APIs.
+Handle loading, error, and success states.
+```
+
+### Commit message
+```text
+feat(retail): add payment and receipt screens
+```
+
+### Definition of done
+- Payment works
+- Receipt works
+- Reprint works
+
+## Frontend Phase 8 — Reports and settings
+### Goal
+Build reports, settings, audit log.
+
+### Tasks
+- Create reports page
+- Create settings page
+- Create audit log page
+
+### Copilot prompt
+```text
+Create reports page with filters and CSV export.
+Create settings page with organisation, staff, roles, branches, notifications, subscription.
+Create audit log page with filters and details.
+Connect to backend APIs.
+```
+
+### Commit message
+```text
+feat(platform): add reports, settings, and audit log
+```
+
+### Definition of done
+- Reports work
+- Settings work
+- Audit log works
+
+# QA and Security Phases
+
+## QA Phase 1 — Test setup
+### Goal
+Set up backend and frontend testing.
+
+### Tasks
+- Set up Pytest
+- Set up Vitest
+- Set up Playwright
+- Create test folders
+
+### Copilot prompt
+```text
+Set up Pytest, Vitest, and Playwright for Biashara Pulse.
+Create test folders and example tests.
+Ensure tests run in CI.
+```
+
+### Commit message
+```text
+chore: set up testing tools and folders
+```
+
+### Definition of done
+- Pytest works
+- Vitest works
+- Playwright works
+
+## QA Phase 2 — Backend tests
+### Goal
+Write backend unit and API tests.
+
+### Tasks
+- Test authentication
+- Test organisations
+- Test retail catalogue
+- Test sales
+- Test payments
+
+### Copilot prompt
+```text
+Write backend unit and API tests for authentication, organisations, retail catalogue, sales, payments, returns, shifts, and reports.
+Include happy path, invalid input, permission denial, and cross-tenant denial.
+```
+
+### Commit message
+```text
+test(backend): add unit and API tests
+```
+
+### Definition of done
+- Backend tests pass
+- API tests pass
+- Permission tests pass
+
+## QA Phase 3 — Frontend tests
+### Goal
+Write frontend component and end-to-end tests.
+
+### Tasks
+- Test login
+- Test dashboard
+- Test POS
+- Test checkout
+
+### Copilot prompt
+```text
+Write frontend component tests and Playwright end-to-end tests for login, dashboard, POS, checkout, receipt, stock, and reports.
 Include loading, empty, error, and success states.
 ```
-**Commit message:**
+
+### Commit message
 ```text
-test: add Retail end-to-end user journey tests
+test(frontend): add component and end-to-end tests
 ```
 
+### Definition of done
+- Frontend tests pass
+- E2E tests pass
+
+## QA Phase 4 — Security and tenant isolation
+### Goal
+Test permissions and tenant isolation.
+
+### Tasks
+- Test cross-tenant access
+- Test privilege escalation
+- Test CSRF
+- Test rate limiting
+
+### Copilot prompt
 ```text
 Create security tests for unauthenticated access, revoked membership, wrong branch, foreign tenant access, privilege escalation, invalid CSRF, rate limiting, and sensitive data exposure.
 ```
-**Commit message:**
-```text
-test(security): add authentication and tenant isolation tests
-```
 
+### Commit message
 ```text
-Create reconciliation tests comparing stock ledger to balances, sale totals to lines, confirmed payments to allocations, and customer debt to sales, payments, returns, and refunds.
-Create alerts; do not auto-repair discrepancies.
-```
-**Commit message:**
-```text
-test(retail): add financial and inventory reconciliation tests
-```
-
-```text
-Create backup and recovery documentation with PostgreSQL schedule, restore steps, RTO, RPO, verification, and restore test script.
-Do not store secrets in source code.
-```
-**Commit message:**
-```text
-docs(operations): add backup and recovery procedures
+test(security): add tenant isolation and permission tests
 ```
 
 ### Definition of done
-E2E, security, reconciliation, and restore tests pass; pilot customers onboarded; critical defects resolved.
+- Security tests pass
+- Tenant isolation tests pass
 
-## Phase 6 — Wholesale module
+## QA Phase 5 — Release readiness
 ### Goal
-Build Wholesale after Retail validation.
+Prepare release checklist.
 
-### Copilot prompts and commit messages
-```text
-Create Wholesale models: WholesaleCustomer, CustomerPriceList, WholesaleOrder, WholesaleOrderLine, Delivery, StockTransfer, and Invoice.
-Organisation scope, UUIDs, decimals, constraints.
-Do not reuse Retail sale models directly.
-```
-**Commit message:**
-```text
-feat(wholesale): add wholesale domain models
-```
+### Tasks
+- Review acceptance criteria
+- Review security
+- Review performance
+- Prepare release notes
 
+### Copilot prompt
 ```text
-Create wholesale order workflow with bulk orders, customer pricing, credit limits, invoices, and delivery tracking.
-Use transactions; prevent orders exceeding approved credit.
-Test order, credit, delivery, invoice, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(wholesale): add orders, credit limits, invoices, and deliveries
+Create release checklist for Biashara Pulse.
+Include acceptance criteria, security review, performance review, backup verification, rollback plan, and release notes.
 ```
 
+### Commit message
 ```text
-Create stock transfer workflow between warehouses or branches.
-Use transactions, stock movements, and prevent negative stock.
-Test success, insufficient stock, duplicate transfer, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(wholesale): add inter-branch stock transfers
+docs: add release checklist
 ```
 
 ### Definition of done
-Wholesale customers, orders, invoices, deliveries, transfers, and credit limits work.
+- Release checklist ready
+- Security reviewed
+- Performance reviewed
 
-## Phase 7 — Schools module
+# Deployment Phases
+
+## Deployment Phase 1 — Local environment
 ### Goal
-Build Schools after Wholesale is stable.
+Set up local Docker environment.
 
-### Copilot prompts and commit messages
-```text
-Create Schools models: Student, Guardian, FamilyAccount, FeeStructure, FeePayment, FeeAllocation, Statement, and ArrearsReport.
-Organisation scope, UUIDs, decimals, constraints.
-Do not reuse Retail customer models.
-```
-**Commit message:**
-```text
-feat(schools): add students, families, fees, and payments models
-```
+### Tasks
+- Create Dockerfile
+- Create docker-compose
+- Set up env variables
 
+### Copilot prompt
 ```text
-Create fee payment workflow.
-Identify student or family, view balance, record payment, allocate to fee categories, generate receipt.
-Use transactions; prevent over-allocation.
-Test payment, allocation, statement, arrears, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(schools): add fee collection and payment allocation
+Create Dockerfile and docker-compose for Django backend, PostgreSQL, Redis, Celery worker, and React frontend.
+Use environment variables for secrets.
+Create .env.example without real secrets.
 ```
 
+### Commit message
 ```text
-Create arrears reporting by class, term, and family.
-Add CSV export and Celery payment reminders.
-Test arrears calculation, reminders, and tenant isolation.
-```
-**Commit message:**
-```text
-feat(schools): add arrears reporting and reminders
+chore: add Docker and local environment setup
 ```
 
 ### Definition of done
-Students, families, fees, payments, statements, arrears, and reminders work.
+- Docker works
+- Local environment runs
 
-## Phase 8 — Pharmacy module
+## Deployment Phase 2 — CI/CD
 ### Goal
-Build Pharmacy after Schools and regulatory review.
+Set up GitHub Actions.
 
-### Copilot prompts and commit messages
-```text
-Create Pharmacy models: Medicine, MedicineBatch, Supplier, Purchase, PurchaseLine, PharmacySale, PharmacySaleLine, and StockAdjustment.
-Organisation scope, UUIDs, decimals, constraints.
-Do not reuse Retail product or sale models.
-```
-**Commit message:**
-```text
-feat(pharmacy): add medicines, batches, and pharmacy sales models
-```
+### Tasks
+- Create CI workflow
+- Run tests
+- Build Docker image
 
+### Copilot prompt
 ```text
-Create batch and expiry workflow.
-Track batch number, expiry, quantity, and cost.
-Prevent expired batch sales.
-Create low-stock and expiry alerts.
-Test batch selection, expiry validation, stock reduction, duplicate prevention, and tenant isolation.
-```
-**Commit message:**
-```text
-feat(pharmacy): add batch tracking and expiry controls
+Create GitHub Actions CI workflow for backend linting, Django tests, frontend linting, TypeScript checks, and frontend tests.
+Use PostgreSQL and Redis services.
+Do not deploy to production automatically.
 ```
 
+### Commit message
 ```text
-Create pharmacy POS workflow.
-Search medicines, select batches, complete sales, generate receipts.
-Use transactions; prevent expired batch sales.
-Test success, expired rejection, insufficient stock, and cross-tenant denial.
-```
-**Commit message:**
-```text
-feat(pharmacy): add pharmacy POS and batch-aware sales
+ci: add backend and frontend CI workflow
 ```
 
 ### Definition of done
-Medicines, batches, expiry, suppliers, purchases, sales, and alerts work; regulatory review complete for dispensing.
+- CI runs
+- Tests pass
+- Docker image builds
 
-## Phase 9 — Scale and improvement
+## Deployment Phase 3 — Staging
 ### Goal
-Improve performance, reliability, and customer experience.
+Deploy to staging.
 
-### Copilot prompts and commit messages
-```text
-Analyse Django codebase for N+1 queries, missing indexes, slow reports, and unnecessary calls.
-Do not change business logic.
-Suggest safe optimisations with query counts and test coverage.
-```
-**Commit message:**
-```text
-perf: identify query and indexing optimisations
-```
+### Tasks
+- Create staging environment
+- Deploy backend
+- Deploy frontend
+- Run smoke tests
 
+### Copilot prompt
 ```text
-Create performance tests for catalogue search, checkout, reports, receiving, and concurrent cashiers.
-Use realistic staging data.
-Report p95 latency, error rate, and query count.
-```
-**Commit message:**
-```text
-test(performance): add Retail performance benchmarks
+Create staging deployment configuration for Biashara Pulse.
+Deploy backend and frontend.
+Run smoke tests after deployment.
 ```
 
+### Commit message
 ```text
-Create customer feedback analysis workflow.
-Collect pilot feedback, categorise issues, identify recurring problems, propose prioritised improvements.
-Do not add features without validated need.
-```
-**Commit message:**
-```text
-docs(product): add customer feedback analysis workflow
+chore: add staging deployment
 ```
 
 ### Definition of done
-Performance improves; feedback addressed; system stable; new features validated.
+- Staging works
+- Smoke tests pass
+
+## Deployment Phase 4 — Production
+### Goal
+Deploy to production.
+
+### Tasks
+- Create production environment
+- Deploy backend
+- Deploy frontend
+- Run post-deployment checks
+
+### Copilot prompt
+```text
+Create production deployment configuration for Biashara Pulse.
+Deploy backend and frontend.
+Run post-deployment checks.
+```
+
+### Commit message
+```text
+chore: add production deployment
+```
+
+### Definition of done
+- Production works
+- Post-deployment checks pass
+
+## Deployment Phase 5 — Monitoring and backups
+### Goal
+Set up monitoring and backups.
+
+### Tasks
+- Set up monitoring
+- Set up alerts
+- Set up backups
+- Test recovery
+
+### Copilot prompt
+```text
+Set up monitoring, alerts, backups, and recovery testing for Biashara Pulse.
+Monitor application errors, latency, database health, background jobs, and payment failures.
+```
+
+### Commit message
+```text
+chore: add monitoring, alerts, and backups
+```
+
+### Definition of done
+- Monitoring works
+- Alerts work
+- Backups work
+- Recovery tested

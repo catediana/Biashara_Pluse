@@ -5,6 +5,12 @@ from . import views
 app_name = "retail"
 
 urlpatterns = [
+    path("customers/", views.CustomerListCreateView.as_view(), name="customer-list"),
+    path(
+        "customers/<uuid:customer_pk>/collections/",
+        views.CustomerCollectionView.as_view(),
+        name="customer-collection",
+    ),
     path("products/", views.ProductListCreateView.as_view(), name="product-list"),
     path(
         "products/<uuid:pk>/",
@@ -27,6 +33,26 @@ urlpatterns = [
         name="stock-adjustment-decision",
     ),
     path("checkout/", views.CheckoutView.as_view(), name="checkout"),
+    path(
+        "payments/<uuid:pk>/stk-push/",
+        views.MpesaPaymentInitiateView.as_view(),
+        name="mpesa-payment-initiate",
+    ),
+    path(
+        "mpesa/callback/",
+        views.MpesaCallbackView.as_view(),
+        name="mpesa-callback",
+    ),
+    path(
+        "sales/<uuid:pk>/returns/",
+        views.SaleReturnCreateView.as_view(),
+        name="sale-return-create",
+    ),
+    path(
+        "refunds/<uuid:pk>/complete/",
+        views.RefundCompleteView.as_view(),
+        name="refund-complete",
+    ),
     path(
         "sales/<uuid:pk>/receipt/",
         views.SaleReceiptView.as_view(),
