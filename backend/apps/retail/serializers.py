@@ -8,6 +8,7 @@ from apps.organisations.models import Branch
 from .models import (
     Category,
     Customer,
+    Expense,
     GoodsReceipt,
     GoodsReceiptLine,
     Product,
@@ -554,6 +555,143 @@ class CustomerCollectionSerializer(serializers.Serializer):
 
 class PaymentInitiateSerializer(serializers.Serializer):
     phone_number = serializers.CharField(max_length=20)
+
+
+class RetailDateFilterSerializer(serializers.Serializer):
+    branch_id = serializers.PrimaryKeyRelatedField(
+        queryset=Branch.objects.none(),
+        required=False,
+        source="branch",
+    )
+    from_date = serializers.DateField(required=False)
+    to_date = serializers.DateField(required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        organisation = self.context["request"].active_organisation
+        self.fields["branch_id"].queryset = Branch.objects.for_organisation(
+            organisation
+        ).filter(is_active=True)
+
+    def validate(self, attrs):
+        from_date = attrs.get("from_date")
+        to_date = attrs.get("to_date")
+        if from_date and to_date and from_date > to_date:
+            raise serializers.ValidationError(
+                {"from_date": "Start date must be on or before end date."}
+            )
+        return attrs
+
+
+class ShiftOpenSerializer(serializers.Serializer):
+    branch = serializers.PrimaryKeyRelatedField(
+        queryset=Branch.objects.none()
+    )
+    opening_float = ExactDecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0"),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        organisation = self.context["request"].active_organisation
+        self.fields["branch"].queryset = Branch.objects.for_organisation(
+            organisation
+        ).filter(is_active=True)
+
+
+class ShiftCloseSerializer(serializers.Serializer):
+    counted_cash = ExactDecimalField(
+        max_digits=14,
+        decimal_places=2,
+        min_value=Decimal("0"),
+    )
+
+
+class ShiftReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Shift
+        fields = [
+            "id",
+            "branch",
+            "cashier",
+            "status",
+            "opening_float",
+            "expected_cash",
+            "counted_cash",
+            "variance",
+            "opened_at",
+            "closed_at",
+        ]
+
+
+class ExpenseCreateSerializer(serializers.Serializer):
+    branch = serializers.PrimaryKeyRelatedField(
+        queryset=Branch.objects.none()
+    )
+    shift = serializers.PrimaryKeyRelatedField(queryset=Shift.objects.none())
+    category = serializers.CharField(max_length=80, trim_whitespace=True)
+    description = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+    )
+    amount = ExactDecimalField(
+        max_digits=14,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+    )
+    payment_method = serializers.ChoiceField(
+        choices=Expense.PaymentMethod.choices
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        organisation = self.context["request"].active_organisation
+        self.fields["branch"].queryset = Branch.objects.for_organisation(
+            organisation
+        ).filter(is_active=True)
+        self.fields["shift"].queryset = Shift.objects.for_organisation(
+            organisation
+        )
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        shift = attrs["shift"]
+        if shift.cashier_id != request.user.pk:
+            raise serializers.ValidationError(
+                {"shift": "The shift must belong to the authenticated cashier."}
+            )
+        if shift.branch_id != attrs["branch"].pk:
+            raise serializers.ValidationError(
+                {"branch": "The branch must match the selected shift."}
+            )
+        raw_key = request.headers.get("Idempotency-Key")
+        try:
+            attrs["idempotency_key"] = UUID(raw_key)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise serializers.ValidationError(
+                {"idempotency_key": "A valid Idempotency-Key header is required."}
+            ) from exc
+        return attrs
+
+
+class ExpenseReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Expense
+        fields = [
+            "id",
+            "branch",
+            "shift",
+            "category",
+            "description",
+            "amount",
+            "payment_method",
+            "created_by",
+            "created_at",
+        ]
 
 
 class SaleReturnLineInputSerializer(serializers.Serializer):

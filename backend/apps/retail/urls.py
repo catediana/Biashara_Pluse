@@ -32,6 +32,14 @@ urlpatterns = [
         views.StockAdjustmentDecisionView.as_view(),
         name="stock-adjustment-decision",
     ),
+    path("shifts/", views.ShiftListView.as_view(), name="shift-list"),
+    path("shifts/open/", views.ShiftOpenView.as_view(), name="shift-open"),
+    path(
+        "shifts/<uuid:pk>/close/",
+        views.ShiftCloseView.as_view(),
+        name="shift-close",
+    ),
+    path("expenses/", views.ExpenseListCreateView.as_view(), name="expense-list"),
     path("checkout/", views.CheckoutView.as_view(), name="checkout"),
     path(
         "payments/<uuid:pk>/stk-push/",

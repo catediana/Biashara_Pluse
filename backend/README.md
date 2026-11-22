@@ -143,6 +143,50 @@ Assign these `Permission` codenames to roles for the related workflows:
 `retail.customers.create`. Grant branch access using `BranchGrant`, or set
 membership `all_branches` for organisation-wide branch access.
 
+## Cashier shifts and expenses
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/retail/shifts/open/` | Open the authenticated cashier's shift with a branch and opening float |
+| GET | `/api/retail/shifts/` | List shifts with optional branch and date filters |
+| POST | `/api/retail/shifts/<uuid>/close/` | Close a shift with a counted cash amount |
+| GET, POST | `/api/retail/expenses/` | List or record expenses |
+
+Expense creation requires `Idempotency-Key`, the cashier's open shift, a
+category, a positive amount, and a `cash` or `mpesa` payment method. Expense
+records are immutable. Closing a shift stores expected cash, counted cash, and
+variance (`counted_cash - expected_cash`). Expected cash is the opening float
+plus confirmed cash sales and collections, less cash expenses and cash refunds
+recorded against that shift. Pending M-Pesa payments are excluded. A cash refund
+requires the cashier's open shift at the sale's branch.
+
+Assign `retail.shifts.open`, `retail.shifts.view`, `retail.shifts.close`,
+`retail.expenses.view`, and `retail.expenses.create` to the appropriate roles.
+List endpoints accept `branch_id`, `from_date`, and `to_date` and use
+page-number pagination.
+
+## Retail reports
+
+All reports require the `retail.reports.view` permission and Retail module
+entitlement. They accept optional `branch_id`, `from_date`, and `to_date`
+filters. JSON responses use page-number pagination; add `export=csv` to download
+all matching rows as CSV.
+
+| Path | Contents |
+|---|---|
+| `/api/reporting/sales-summary/` | Daily posted sales, returns, and net sales by branch |
+| `/api/reporting/stock/` | Product stock with opening and closing quantities, change, and estimated value |
+| `/api/reporting/customer-debt/` | Remaining balances for credit sales in the selected date range |
+| `/api/reporting/expenses/` | Expenses by date, category, branch, and payment method |
+| `/api/reporting/profit/` | Net sales less net cost of goods sold and expenses by day and branch |
+
+The customer debt report uses confirmed collections and credit reductions on
+returns through `to_date`; a supplied `from_date` scopes the credit sales being
+reported. Stock quantities for a date range are reconstructed from stock
+movements; estimated values use each balance's current average cost. Profit is
+an operational estimate based on sale-line cost snapshots and excludes tax
+accounting.
+
 ## Local setup
 
 From this directory, create and activate a virtual environment, then install:

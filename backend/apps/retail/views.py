@@ -10,11 +10,22 @@ from core.pagination import DefaultPagination
 from core.permissions import HasTenantAccess
 from core.tenancy import get_active_organisation
 
-from .models import Customer, Payment, Product, Refund, Sale, StockAdjustment
+from .models import (
+    Customer,
+    Expense,
+    Payment,
+    Product,
+    Refund,
+    Sale,
+    Shift,
+    StockAdjustment,
+)
 from .serializers import (
     CheckoutSerializer,
     CustomerCollectionSerializer,
     CustomerSerializer,
+    ExpenseCreateSerializer,
+    ExpenseReadSerializer,
     GoodsReceiptCreateSerializer,
     GoodsReceiptReadSerializer,
     PaymentInitiateSerializer,
@@ -23,12 +34,16 @@ from .serializers import (
     RefundCompleteSerializer,
     RefundReadSerializer,
     ReceiptReadSerializer,
+    RetailDateFilterSerializer,
     SaleReadSerializer,
     SaleReturnCreateSerializer,
     SaleReturnReadSerializer,
     StockAdjustmentCreateSerializer,
     StockAdjustmentDecisionSerializer,
     StockAdjustmentReadSerializer,
+    ShiftCloseSerializer,
+    ShiftOpenSerializer,
+    ShiftReadSerializer,
 )
 from .services import (
     approve_stock_adjustment,
@@ -36,14 +51,18 @@ from .services import (
     complete_mpesa_refund,
     checkout,
     checkout_fingerprint,
+    close_shift,
     process_mpesa_callback,
     record_customer_collection,
     goods_receipt_fingerprint,
+    expense_fingerprint,
+    open_shift,
     receive_goods,
     reject_stock_adjustment,
     request_stock_adjustment,
     return_fingerprint,
     return_sale,
+    record_expense,
     start_mpesa_payment,
     stock_adjustment_fingerprint,
 )
@@ -268,6 +287,157 @@ class StockAdjustmentDecisionView(RetailAPIView):
         return Response(
             StockAdjustmentReadSerializer(adjustment).data,
             status=status.HTTP_200_OK,
+        )
+
+
+class ShiftOpenView(RetailAPIView):
+    required_permission = "retail.shifts.open"
+    branch_scoped = True
+
+    def get_required_permission(self):
+        return self.required_permission
+
+    def post(self, request):
+        serializer = ShiftOpenSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        shift, _ = open_shift(
+            organisation=get_active_organisation(request),
+            branch=serializer.validated_data["branch"],
+            opening_float=serializer.validated_data["opening_float"],
+            actor=request.user,
+        )
+        return Response(
+            ShiftReadSerializer(shift).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ShiftListView(RetailAPIView):
+    required_permission = "retail.shifts.view"
+    branch_scoped = True
+
+    def get_required_permission(self):
+        return self.required_permission
+
+    def get(self, request):
+        serializer = RetailDateFilterSerializer(
+            data=request.query_params,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        filters = serializer.validated_data
+        queryset = Shift.objects.for_organisation(
+            get_active_organisation(request)
+        ).select_related("branch", "cashier")
+        if filters.get("branch") is not None:
+            queryset = queryset.filter(branch=filters["branch"])
+        if filters.get("from_date") is not None:
+            queryset = queryset.filter(
+                opened_at__date__gte=filters["from_date"]
+            )
+        if filters.get("to_date") is not None:
+            queryset = queryset.filter(opened_at__date__lte=filters["to_date"])
+        paginator = DefaultPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        return paginator.get_paginated_response(
+            ShiftReadSerializer(page, many=True).data
+        )
+
+
+class ShiftCloseView(RetailAPIView):
+    required_permission = "retail.shifts.close"
+    branch_scoped = True
+    branch_object_lookup = True
+
+    def get_required_permission(self):
+        return self.required_permission
+
+    def post(self, request, pk):
+        shift = (
+            Shift.objects.for_organisation(get_active_organisation(request))
+            .filter(pk=pk)
+            .first()
+        )
+        if shift is None:
+            raise Http404
+        self.check_object_permissions(request, shift)
+        serializer = ShiftCloseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        shift, _ = close_shift(
+            organisation=get_active_organisation(request),
+            shift_id=shift.pk,
+            counted_cash=serializer.validated_data["counted_cash"],
+            actor=request.user,
+        )
+        if shift is None:
+            raise Http404
+        return Response(ShiftReadSerializer(shift).data)
+
+
+class ExpenseListCreateView(RetailAPIView):
+    permission_by_method = {
+        "GET": "retail.expenses.view",
+        "HEAD": "retail.expenses.view",
+        "OPTIONS": "retail.expenses.view",
+        "POST": "retail.expenses.create",
+    }
+    branch_scoped = True
+
+    def get_required_permission(self):
+        return self.permission_by_method.get(
+            self.request.method,
+            "retail.expenses.view",
+        )
+
+    def get(self, request):
+        serializer = RetailDateFilterSerializer(
+            data=request.query_params,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        filters = serializer.validated_data
+        queryset = Expense.objects.for_organisation(
+            get_active_organisation(request)
+        ).select_related("branch", "shift", "created_by")
+        if filters.get("branch") is not None:
+            queryset = queryset.filter(branch=filters["branch"])
+        if filters.get("from_date") is not None:
+            queryset = queryset.filter(
+                created_at__date__gte=filters["from_date"]
+            )
+        if filters.get("to_date") is not None:
+            queryset = queryset.filter(created_at__date__lte=filters["to_date"])
+        paginator = DefaultPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        return paginator.get_paginated_response(
+            ExpenseReadSerializer(page, many=True).data
+        )
+
+    def post(self, request):
+        serializer = ExpenseCreateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        expense, created = record_expense(
+            organisation=get_active_organisation(request),
+            branch=data["branch"],
+            shift=data["shift"],
+            category=data["category"],
+            description=data.get("description", ""),
+            amount=data["amount"],
+            payment_method=data["payment_method"],
+            idempotency_key=data["idempotency_key"],
+            request_fingerprint=expense_fingerprint(data),
+            actor=request.user,
+        )
+        return Response(
+            ExpenseReadSerializer(expense).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
 

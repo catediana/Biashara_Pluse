@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
@@ -246,6 +248,25 @@ class Shift(TenantModel):
         decimal_places=2,
         validators=[MinValueValidator(0)],
     )
+    expected_cash = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    counted_cash = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+    variance = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     opened_at = models.DateTimeField(auto_now_add=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
@@ -284,10 +305,104 @@ class Shift(TenantModel):
             raise ValidationError(
                 {"closed_at": "A closed shift must have a close time."}
             )
+        reconciliation = (
+            self.expected_cash,
+            self.counted_cash,
+            self.variance,
+        )
+        if any(value is not None for value in reconciliation):
+            if any(value is None for value in reconciliation):
+                raise ValidationError(
+                    "Expected, counted, and variance cash must be recorded together."
+                )
+            if self.variance != self.counted_cash - self.expected_cash:
+                raise ValidationError(
+                    {"variance": "Variance must equal counted cash minus expected cash."}
+                )
 
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+class Expense(TenantModel):
+    class PaymentMethod(models.TextChoices):
+        CASH = "cash", "Cash"
+        MPESA = "mpesa", "M-Pesa"
+
+    branch = models.ForeignKey(
+        "organisations.Branch",
+        on_delete=models.PROTECT,
+        related_name="retail_expenses",
+    )
+    shift = models.ForeignKey(
+        Shift,
+        on_delete=models.PROTECT,
+        related_name="expenses",
+    )
+    category = models.CharField(max_length=80)
+    description = models.CharField(max_length=255, blank=True)
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    payment_method = models.CharField(
+        max_length=10,
+        choices=PaymentMethod.choices,
+    )
+    idempotency_key = models.UUIDField()
+    request_fingerprint = models.CharField(max_length=64)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="retail_expenses",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organisation", "idempotency_key"],
+                name="uniq_expense_idem_org",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="retail_expense_amount_positive",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["organisation", "branch", "created_at"],
+                name="expense_org_branch_date_idx",
+            ),
+            models.Index(
+                fields=["organisation", "shift", "created_at"],
+                name="expense_org_shift_date_idx",
+            ),
+        ]
+        ordering = ["-created_at"]
+
+    def clean(self):
+        super().clean()
+        if self.amount <= 0:
+            raise ValidationError({"amount": "Expense amount must be positive."})
+        if (
+            self.branch.organisation_id != self.organisation_id
+            or self.shift.organisation_id != self.organisation_id
+            or self.shift.branch_id != self.branch_id
+        ):
+            raise ValidationError(
+                "Expense branch and shift must belong to this organisation."
+            )
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Expenses are immutable.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Expenses cannot be deleted.")
 
 
 class Customer(TenantModel):
@@ -1091,6 +1206,13 @@ class Refund(TenantModel):
         on_delete=models.PROTECT,
         related_name="refund",
     )
+    shift = models.ForeignKey(
+        Shift,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="refunds",
+    )
     method = models.CharField(max_length=10, choices=Method.choices)
     status = models.CharField(max_length=10, choices=Status.choices)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
@@ -1122,6 +1244,13 @@ class Refund(TenantModel):
         ):
             raise ValidationError(
                 "Refund must match its return tenant and remaining refund amount."
+            )
+        if self.shift_id and (
+            self.shift.organisation_id != self.organisation_id
+            or self.shift.branch_id != self.sale_return.branch_id
+        ):
+            raise ValidationError(
+                {"shift": "Refund shift must match the return tenant and branch."}
             )
         if self.method == self.Method.CASH and self.status != self.Status.COMPLETED:
             raise ValidationError({"status": "Cash refunds complete immediately."})

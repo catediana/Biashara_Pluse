@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
@@ -16,6 +16,7 @@ from apps.integrations.mpesa import (
 )
 from apps.retail.models import (
     Customer,
+    Expense,
     GoodsReceipt,
     GoodsReceiptLine,
     MpesaProviderEvent,
@@ -73,6 +74,19 @@ def stock_adjustment_fingerprint(data):
             "quantity_delta": _decimal_text(data["quantity_delta"]),
             "expected_stock_version": data["expected_stock_version"],
             "reason": data["reason"],
+        }
+    )
+
+
+def expense_fingerprint(data):
+    return _fingerprint(
+        {
+            "branch": str(data["branch"].pk),
+            "shift": str(data["shift"].pk),
+            "category": data["category"],
+            "description": data.get("description", ""),
+            "amount": _decimal_text(data["amount"]),
+            "payment_method": data["payment_method"],
         }
     )
 
@@ -279,6 +293,203 @@ def customer_credit_balance(*, organisation, customer):
         - (credit_returns or Decimal("0.00")),
         Decimal("0.00"),
     )
+
+
+def open_shift(*, organisation, branch, opening_float, actor):
+    try:
+        with transaction.atomic():
+            existing = (
+                Shift.objects.for_organisation(organisation)
+                .select_for_update()
+                .filter(
+                    branch=branch,
+                    cashier=actor,
+                    status=Shift.Status.OPEN,
+                )
+                .first()
+            )
+            if existing is not None:
+                raise ConflictError("The cashier already has an open shift at this branch.")
+            shift = Shift.objects.create(
+                organisation=organisation,
+                branch=branch,
+                cashier=actor,
+                opening_float=opening_float,
+            )
+            AuditEvent.objects.create(
+                organisation=organisation,
+                actor=actor,
+                action="retail.shift.opened",
+                target_type="retail.Shift",
+                target_id=str(shift.pk),
+                metadata={
+                    "branch_id": str(branch.pk),
+                    "opening_float": format(opening_float, ".2f"),
+                },
+            )
+            return shift, True
+    except IntegrityError as exc:
+        raise ConflictError(
+            "The cashier already has an open shift at this branch."
+        ) from exc
+
+
+def expected_cash_for_shift(*, organisation, shift):
+    cash_payments = Payment.objects.for_organisation(organisation).filter(
+        shift=shift,
+        method=Payment.Method.CASH,
+        status=Payment.Status.CONFIRMED,
+    )
+    cash_payments = cash_payments.filter(
+        Q(purpose=Payment.Purpose.COLLECTION)
+        | Q(purpose=Payment.Purpose.SALE, sale__status=Sale.Status.POSTED)
+    )
+    received = cash_payments.aggregate(total=Sum("amount"))["total"]
+    expenses = Expense.objects.for_organisation(organisation).filter(
+        shift=shift,
+        payment_method=Expense.PaymentMethod.CASH,
+    ).aggregate(total=Sum("amount"))["total"]
+    refunds = Refund.objects.for_organisation(organisation).filter(
+        shift=shift,
+        method=Refund.Method.CASH,
+        status=Refund.Status.COMPLETED,
+    ).aggregate(total=Sum("amount"))["total"]
+    return (
+        shift.opening_float
+        + (received or Decimal("0.00"))
+        - (expenses or Decimal("0.00"))
+        - (refunds or Decimal("0.00"))
+    )
+
+
+def close_shift(*, organisation, shift_id, counted_cash, actor):
+    with transaction.atomic():
+        shift = (
+            Shift.objects.for_organisation(organisation)
+            .select_for_update()
+            .filter(pk=shift_id)
+            .first()
+        )
+        if shift is None:
+            return None, False
+        if shift.cashier_id != actor.pk:
+            raise BusinessRuleError("Only the cashier who opened the shift can close it.")
+        if shift.status == Shift.Status.CLOSED:
+            if shift.counted_cash != counted_cash:
+                raise ConflictError("The shift was already closed with a different cash count.")
+            return shift, False
+
+        expected_cash = expected_cash_for_shift(
+            organisation=organisation,
+            shift=shift,
+        )
+        shift.status = Shift.Status.CLOSED
+        shift.closed_at = timezone.now()
+        shift.expected_cash = expected_cash
+        shift.counted_cash = counted_cash
+        shift.variance = counted_cash - expected_cash
+        shift.save(
+            update_fields=[
+                "status",
+                "closed_at",
+                "expected_cash",
+                "counted_cash",
+                "variance",
+                "updated_at",
+            ]
+        )
+        AuditEvent.objects.create(
+            organisation=organisation,
+            actor=actor,
+            action="retail.shift.closed",
+            target_type="retail.Shift",
+            target_id=str(shift.pk),
+            metadata={
+                "expected_cash": format(expected_cash, ".2f"),
+                "counted_cash": format(counted_cash, ".2f"),
+                "variance": format(shift.variance, ".2f"),
+            },
+        )
+        return shift, True
+
+
+def record_expense(
+    *,
+    organisation,
+    branch,
+    shift,
+    category,
+    description,
+    amount,
+    payment_method,
+    idempotency_key,
+    request_fingerprint,
+    actor,
+):
+    try:
+        with transaction.atomic():
+            existing = (
+                Expense.objects.for_organisation(organisation)
+                .select_for_update()
+                .filter(idempotency_key=idempotency_key)
+                .first()
+            )
+            if existing is not None:
+                return _check_retry(existing, request_fingerprint)
+
+            locked_shift = (
+                Shift.objects.for_organisation(organisation)
+                .select_for_update()
+                .filter(
+                    pk=shift.pk,
+                    branch=branch,
+                    cashier=actor,
+                    status=Shift.Status.OPEN,
+                )
+                .first()
+            )
+            if locked_shift is None:
+                raise BusinessRuleError(
+                    "Expenses require the cashier's open shift at this branch."
+                )
+            expense = Expense.objects.create(
+                organisation=organisation,
+                branch=branch,
+                shift=locked_shift,
+                category=category,
+                description=description,
+                amount=amount,
+                payment_method=payment_method,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                created_by=actor,
+            )
+            AuditEvent.objects.create(
+                organisation=organisation,
+                actor=actor,
+                action="retail.expense.recorded",
+                target_type="retail.Expense",
+                target_id=str(expense.pk),
+                correlation_id=idempotency_key,
+                metadata={
+                    "branch_id": str(branch.pk),
+                    "shift_id": str(locked_shift.pk),
+                    "amount": format(amount, ".2f"),
+                    "payment_method": payment_method,
+                    "category": category,
+                },
+            )
+            return expense, True
+    except IntegrityError:
+        existing_result = _find_existing(
+            Expense,
+            organisation,
+            idempotency_key,
+            request_fingerprint,
+        )
+        if existing_result is None:
+            raise
+        return existing_result
 
 
 def checkout(
@@ -1306,6 +1517,22 @@ def return_sale(
                 raise BusinessRuleError(
                     "Choose cash or M-Pesa for the refundable amount."
                 )
+            refund_shift = None
+            if refund_amount > 0 and refund_method == Refund.Method.CASH:
+                refund_shift = (
+                    Shift.objects.for_organisation(organisation)
+                    .select_for_update()
+                    .filter(
+                        branch=sale.branch,
+                        cashier=actor,
+                        status=Shift.Status.OPEN,
+                    )
+                    .first()
+                )
+                if refund_shift is None:
+                    raise BusinessRuleError(
+                        "A cash refund requires the cashier's open shift at this branch."
+                    )
 
             sale_return = SaleReturn.objects.create(
                 organisation=organisation,
@@ -1378,6 +1605,7 @@ def return_sale(
                 Refund.objects.create(
                     organisation=organisation,
                     sale_return=sale_return,
+                    shift=refund_shift,
                     method=refund_method,
                     status=refund_status,
                     amount=refund_amount,
