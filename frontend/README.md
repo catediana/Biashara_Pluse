@@ -20,6 +20,14 @@ The API client uses the backend's secure session-cookie and CSRF flow. It does
 not store credentials or auth tokens in browser storage. The active organisation
 UUID is kept in `sessionStorage` and sent as `X-Organisation-ID`.
 
+## Authentication
+
+Guest authentication screens are available at `/login`, `/signup`,
+`/forgot-password`, and `/reset-password/:uidb64/:token`. Registration signs the
+new user in with the returned session cookie. Password reset requests always
+show a generic confirmation so the interface does not reveal whether an email
+address has an account.
+
 ## Checks
 
 ```powershell

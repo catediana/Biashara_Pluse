@@ -8,7 +8,10 @@ import {
 } from 'react-router-dom'
 
 import { useAuth } from '../features/auth/auth-context'
+import { ForgotPasswordPage } from '../features/auth/forgot-password-page'
 import { LoginPage } from '../features/auth/login-page'
+import { ResetPasswordPage } from '../features/auth/reset-password-page'
+import { SignupPage } from '../features/auth/signup-page'
 import {
   DashboardPage,
   WorkspacePlaceholder,
@@ -60,13 +63,21 @@ function AuthGate() {
 function GuestGate() {
   const { user, isLoading } = useAuth()
   if (isLoading) return null
-  return user ? <Navigate to="/" replace /> : <LoginPage />
+  return user ? <Navigate to="/" replace /> : <Outlet />
 }
 
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<GuestGate />} />
+      <Route element={<GuestGate />}>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignupPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route
+          path="/reset-password/:uidb64/:token"
+          element={<ResetPasswordPage />}
+        />
+      </Route>
       <Route element={<AuthGate />}>
         <Route path="/" element={<AppLayout />}>
           <Route index element={<DashboardPage />} />

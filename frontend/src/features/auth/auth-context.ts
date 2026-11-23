@@ -7,6 +7,11 @@ export interface AuthContextValue {
   isLoading: boolean
   error: Error | null
   signIn: (email: string, password: string) => Promise<AuthUser>
+  signUp: (
+    fullName: string,
+    email: string,
+    password: string,
+  ) => Promise<AuthUser>
   signOut: () => Promise<void>
 }
 

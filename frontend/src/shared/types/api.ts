@@ -13,3 +13,7 @@ export interface AuthResponse {
 export interface CurrentUserResponse {
   user: AuthUser
 }
+
+export interface MessageResponse {
+  detail: string
+}

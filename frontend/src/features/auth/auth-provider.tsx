@@ -45,6 +45,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
     },
   })
 
+  const register = useMutation({
+    mutationFn: ({
+      fullName,
+      email,
+      password,
+    }: {
+      fullName: string
+      email: string
+      password: string
+    }) => apiClient.register(fullName, email, password),
+    onSuccess: ({ user }) => {
+      queryClient.setQueryData(CURRENT_USER_KEY, user)
+    },
+  })
+
   const logout = useMutation({
     mutationFn: apiClient.logout,
     onSuccess: () => {
@@ -58,6 +73,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       (await login.mutateAsync({ email, password })).user,
     [login],
   )
+  const signUp = useCallback(
+    async (fullName: string, email: string, password: string) =>
+      (await register.mutateAsync({ fullName, email, password })).user,
+    [register],
+  )
   const signOut = useCallback(async () => {
     await logout.mutateAsync()
   }, [logout])
@@ -69,6 +89,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         isLoading: currentUser.isPending,
         error: currentUser.error,
         signIn,
+        signUp,
         signOut,
       }}
     >

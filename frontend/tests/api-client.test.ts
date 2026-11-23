@@ -40,4 +40,39 @@ describe('session API client', () => {
       'org-uuid',
     )
   })
+
+  it('sends registration and password reset requests to the auth API', async () => {
+    document.cookie = 'csrftoken=csrf-secret; path=/'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Request accepted.' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiClient.register('Nia Kamau', 'nia@example.test', 'password-123')
+    await apiClient.requestPasswordReset('nia@example.test')
+    await apiClient.confirmPasswordReset(
+      'uid-1',
+      'token-1',
+      'new-password-123',
+      'new-password-123',
+    )
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/auth/register/',
+      '/api/auth/password-reset/request/',
+      '/api/auth/password-reset/confirm/uid-1/token-1/',
+    ])
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
+      full_name: 'Nia Kamau',
+      email: 'nia@example.test',
+      password: 'password-123',
+    })
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body as string)).toEqual({
+      new_password: 'new-password-123',
+      new_password_confirm: 'new-password-123',
+    })
+  })
 })

@@ -1,6 +1,7 @@
 import type {
   AuthResponse,
   CurrentUserResponse,
+  MessageResponse,
 } from '../types/api'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(
@@ -60,6 +61,12 @@ function errorMessage(body: unknown, fallback: string): string {
   ) {
     return body.detail
   }
+  if (typeof body === 'object' && body !== null) {
+    const messages = Object.values(body)
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+      .filter((value): value is string => typeof value === 'string')
+    if (messages.length) return messages.join(' ')
+  }
   return fallback
 }
 
@@ -113,6 +120,36 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
+  register: (fullName: string, email: string, password: string) =>
+    request<AuthResponse>('/auth/register/', {
+      method: 'POST',
+      body: JSON.stringify({
+        full_name: fullName,
+        email,
+        password,
+      }),
+    }),
+  requestPasswordReset: (email: string) =>
+    request<MessageResponse>('/auth/password-reset/request/', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  confirmPasswordReset: (
+    uidb64: string,
+    token: string,
+    newPassword: string,
+    newPasswordConfirm: string,
+  ) =>
+    request<MessageResponse>(
+      `/auth/password-reset/confirm/${encodeURIComponent(uidb64)}/${encodeURIComponent(token)}/`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          new_password: newPassword,
+          new_password_confirm: newPasswordConfirm,
+        }),
+      },
+    ),
   logout: () => request<void>('/auth/logout/', { method: 'POST' }),
   sessionRefresh: () =>
     request<AuthResponse>('/auth/session/refresh/', { method: 'POST' }),

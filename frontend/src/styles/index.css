@@ -805,6 +805,16 @@ a {
   font-size: 11px;
 }
 
+.form-success {
+  border: 1px solid #d5e9d8;
+  border-radius: 7px;
+  background: #f1f8f2;
+  padding: 11px 12px;
+  color: #286344;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .button-primary {
   display: inline-flex;
   min-height: 43px;
