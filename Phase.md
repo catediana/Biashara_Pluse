@@ -1,5 +1,7 @@
 # Biashara Pulse — Development Phases
-Version: 1.0 | Date: 2026-11-20
+Version: 1.0 | Date: 2026-11-20  URL: http://127.0.0.1:8000/admin/login/
+Email/username: local-admin@example.test
+Password: Cc87GUt50U0e_5OaGO1hyZJcUryVtjpv
 
 This file contains four implementation tracks: Backend, Frontend, QA and Security, and Deployment.
 Follow the phases in order. After each Copilot prompt, use the commit message shown beneath it.
