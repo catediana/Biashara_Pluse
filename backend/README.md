@@ -50,6 +50,29 @@ codename, optional `required_module`, and `branch_scoped = True`. Branch-scoped
 list views must also filter their queryset by the requested, authorised branch;
 detail views should enable object-permission checks.
 
+Organisation management endpoints use the authenticated session and
+`X-Organisation-ID` for tenant-scoped staff and role operations:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET, POST | `/api/organisations/` | List the signed-in user's organisations or create one |
+| GET, POST | `/api/organisations/members/` | List staff or add an existing account to the selected organisation |
+| PATCH | `/api/organisations/members/<uuid>/` | Update a staff role, status, or branch scope |
+| GET | `/api/organisations/branches/` | List active branches for staff assignment |
+| GET, POST | `/api/rbac/roles/` | List roles or create a role and assign permissions |
+| PATCH | `/api/rbac/roles/<uuid>/` | Update a role or activate/deactivate it |
+| GET | `/api/rbac/permissions/` | List active permissions for role configuration |
+
+Creating an organisation provisions an Owner system role, grants the creator
+active membership with all-branch access, and assigns the current permission
+catalogue. The RBAC data migration seeds the permissions used by the current
+Retail APIs and management screens. New staff must already have an active user
+account; membership creation does not create credentials or send invitations.
+Staff and role operations are restricted by the selected organisation's
+`staff.manage` and `rbac.manage` permissions. Membership and role lookups are
+always scoped to the selected organisation, and system roles cannot be assigned
+or edited through these endpoints.
+
 ## Retail catalogue and inventory API
 
 Select an organisation on authenticated requests with the `X-Organisation-ID`

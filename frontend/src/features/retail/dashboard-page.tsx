@@ -39,9 +39,11 @@ export function DashboardPage() {
           <div>
             <h2>Select your organisation</h2>
             <p>
-              Enter an organisation ID in the top bar to load its workspace.
-              Your administrator can provide this ID.
+              Choose a workspace you belong to or create a new organisation.
             </p>
+            <Link className="text-link mt-3 inline-flex" to="/organisations">
+              View organisations →
+            </Link>
           </div>
         </section>
       ) : (

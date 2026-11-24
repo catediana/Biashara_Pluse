@@ -59,6 +59,40 @@ class HasActiveOrganisation(HasMembership):
     pass
 
 
+class HasOrganisationPermission(BasePermission):
+    message = "You do not have permission to manage this organisation."
+
+    def has_permission(self, request, view):
+        membership = get_active_membership(request)
+        organisation = _active_organisation(request)
+        permission_code = getattr(view, "required_permission", None)
+        if membership is None or organisation is None or permission_code is None:
+            return False
+        return RolePermission.objects.for_organisation(organisation).filter(
+            role_id=membership.role_id,
+            role__organisation_id=organisation.pk,
+            role__is_active=True,
+            permission__codename=permission_code,
+            permission__is_active=True,
+        ).exists()
+
+
+class HasAnyOrganisationPermission(HasOrganisationPermission):
+    def has_permission(self, request, view):
+        membership = get_active_membership(request)
+        organisation = _active_organisation(request)
+        permission_codes = getattr(view, "required_permissions", ())
+        if membership is None or organisation is None or not permission_codes:
+            return False
+        return RolePermission.objects.for_organisation(organisation).filter(
+            role_id=membership.role_id,
+            role__organisation_id=organisation.pk,
+            role__is_active=True,
+            permission__codename__in=permission_codes,
+            permission__is_active=True,
+        ).exists()
+
+
 class HasRolePermission(BasePermission):
     message = "You do not have permission to perform this action."
 

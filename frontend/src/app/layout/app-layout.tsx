@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../../features/auth/auth-context'
 import { useOrganisation } from '../../features/organisations/organisation-context'
@@ -10,20 +10,23 @@ const navigation = [
   { label: 'Inventory', path: '/inventory', mark: '▤' },
   { label: 'Customers', path: '/customers', mark: '◎' },
   { label: 'Reports', path: '/reports', mark: '⌁' },
+  { label: 'Organisations', path: '/organisations', mark: '⌂' },
+  { label: 'Staff', path: '/staff', mark: '♙' },
+  { label: 'Roles', path: '/roles', mark: '⚿' },
 ]
 
 const pageTitles: Record<string, string> = {
   '/': 'Overview',
   '/workspace': 'Workspace',
+  '/organisations': 'Organisations',
+  '/organisations/new': 'Create organisation',
+  '/staff': 'Staff management',
+  '/roles': 'Roles & permissions',
 }
 
 export function AppLayout() {
   const { user, signOut } = useAuth()
-  const { organisationId, selectOrganisation } = useOrganisation()
-  const [organisationInput, setOrganisationInput] = useState(
-    organisationId ?? '',
-  )
-  const [organisationError, setOrganisationError] = useState('')
+  const { organisationId } = useOrganisation()
   const [logoutError, setLogoutError] = useState('')
   const location = useLocation()
   const navigate = useNavigate()
@@ -36,26 +39,6 @@ export function AppLayout() {
     .map((part) => part?.[0])
     .join('')
     .toUpperCase()
-
-  function chooseOrganisation(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const value = organisationInput.trim()
-    if (!value) {
-      selectOrganisation(null)
-      setOrganisationError('')
-      return
-    }
-    if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        value,
-      )
-    ) {
-      setOrganisationError('Enter a valid organisation UUID.')
-      return
-    }
-    selectOrganisation(value)
-    setOrganisationError('')
-  }
 
   async function logout() {
     setLogoutError('')
@@ -146,26 +129,10 @@ export function AppLayout() {
             <strong>{title}</strong>
           </div>
           <div className="topbar-actions">
-            <form
-              className="organisation-picker"
-              onSubmit={chooseOrganisation}
-            >
-              <label className="sr-only" htmlFor="active-organisation">
-                Organisation ID
-              </label>
-              <input
-                id="active-organisation"
-                aria-describedby={
-                  organisationError ? 'organisation-error' : undefined
-                }
-                placeholder="Organisation ID"
-                value={organisationInput}
-                onChange={(event) => setOrganisationInput(event.target.value)}
-              />
-              <button type="submit">
-                {organisationId ? 'Switch' : 'Connect'}
-              </button>
-            </form>
+            <Link className="organisation-switcher" to="/organisations">
+              <span className="status-dot" />
+              {organisationId ? 'Switch organisation' : 'Select organisation'}
+            </Link>
             <span className="topbar-divider" />
             <button className="notification-button" aria-label="Notifications">
               ♧
@@ -174,15 +141,6 @@ export function AppLayout() {
             <span className="avatar topbar-avatar">{initials || 'U'}</span>
           </div>
         </header>
-        {organisationError && (
-          <p
-            className="organisation-error"
-            id="organisation-error"
-            role="alert"
-          >
-            {organisationError}
-          </p>
-        )}
         <main className="main-content">
           <Outlet />
         </main>

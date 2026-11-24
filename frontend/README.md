@@ -28,6 +28,12 @@ new user in with the returned session cookie. Password reset requests always
 show a generic confirmation so the interface does not reveal whether an email
 address has an account.
 
+Authenticated workspace pages are available at `/organisations`,
+`/organisations/new`, `/staff`, and `/roles`. Creating an organisation selects
+it as the active workspace. Staff can be added by email only when they already
+have a Biashara Pulse account; role permissions and branch scope are managed
+within the selected organisation.
+
 ## Checks
 
 ```powershell

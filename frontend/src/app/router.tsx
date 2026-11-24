@@ -12,6 +12,10 @@ import { ForgotPasswordPage } from '../features/auth/forgot-password-page'
 import { LoginPage } from '../features/auth/login-page'
 import { ResetPasswordPage } from '../features/auth/reset-password-page'
 import { SignupPage } from '../features/auth/signup-page'
+import { OrganisationCreatePage } from '../features/organisations/organisation-create-page'
+import { OrganisationsPage } from '../features/organisations/organisations-page'
+import { RolesPage } from '../features/organisations/roles-page'
+import { StaffPage } from '../features/organisations/staff-page'
 import {
   DashboardPage,
   WorkspacePlaceholder,
@@ -86,6 +90,10 @@ export function AppRoutes() {
           <Route path="inventory" element={<WorkspacePlaceholder />} />
           <Route path="customers" element={<WorkspacePlaceholder />} />
           <Route path="reports" element={<WorkspacePlaceholder />} />
+          <Route path="organisations" element={<OrganisationsPage />} />
+          <Route path="organisations/new" element={<OrganisationCreatePage />} />
+          <Route path="staff" element={<StaffPage />} />
+          <Route path="roles" element={<RolesPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

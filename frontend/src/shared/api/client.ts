@@ -1,7 +1,16 @@
 import type {
   AuthResponse,
+  BranchListResponse,
   CurrentUserResponse,
   MessageResponse,
+  OrganisationCreateInput,
+  OrganisationListResponse,
+  OrganisationSummary,
+  PermissionListResponse,
+  RoleListResponse,
+  RoleSummary,
+  StaffListResponse,
+  StaffMember,
 } from '../types/api'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(
@@ -153,4 +162,60 @@ export const apiClient = {
   logout: () => request<void>('/auth/logout/', { method: 'POST' }),
   sessionRefresh: () =>
     request<AuthResponse>('/auth/session/refresh/', { method: 'POST' }),
+  listOrganisations: () =>
+    request<OrganisationListResponse>('/organisations/'),
+  createOrganisation: (data: OrganisationCreateInput) =>
+    request<OrganisationSummary>('/organisations/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  listStaff: () => request<StaffListResponse>('/organisations/members/'),
+  listBranches: () => request<BranchListResponse>('/organisations/branches/'),
+  createStaffMember: (data: {
+    email: string
+    role_id: string
+    all_branches: boolean
+    branch_ids: string[]
+  }) =>
+    request<StaffMember>('/organisations/members/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateStaffMember: (
+    membershipId: string,
+    data: {
+      role_id?: string
+      status?: StaffMember['status']
+      all_branches?: boolean
+      branch_ids?: string[]
+    },
+  ) =>
+    request<StaffMember>(`/organisations/members/${membershipId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  listRoles: () => request<RoleListResponse>('/rbac/roles/'),
+  createRole: (data: {
+    name: string
+    description: string
+    permission_ids: string[]
+  }) =>
+    request<RoleSummary>('/rbac/roles/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateRole: (
+    roleId: string,
+    data: {
+      name?: string
+      description?: string
+      is_active?: boolean
+      permission_ids?: string[]
+    },
+  ) =>
+    request<RoleSummary>(`/rbac/roles/${roleId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  listPermissions: () => request<PermissionListResponse>('/rbac/permissions/'),
 }
